@@ -9,8 +9,23 @@ end
 vim.g.loaded_unrealnvim = 1
 
 
-vim.api.nvim_create_user_command("UnrealBuild", function(opts)
+vim.api.nvim_create_user_command("UnrealGen", function(opts)
     require("unreal.commands").generateCommands(opts)
+end, {
+})
+
+vim.api.nvim_create_user_command("UnrealBuild", function(opts)
+    require("unreal.commands").build(opts)
+end, {
+})
+
+vim.api.nvim_create_user_command("UnrealRun", function(opts)
+    require("unreal.commands").run(opts)
+end, {
+})
+
+vim.api.nvim_create_user_command("UnrealCD", function(opts)
+    require("unreal.commands").SetUnrealCD(opts)
 end, {
 })
 
