@@ -21,13 +21,13 @@ function commands._CreateConfigFile(configFilePath, projectName)
             "TargetName" : "]] .. projectName .. [[-Editor",
             "Configuration" : "Development",
             "UbtExtraFlags" : "-Editor",
-            "PlatformName" : "Win64",
+            "PlatformName" : "Win64"
         },
         {
             "TargetName" : "]] .. projectName .. [[",
             "Configuration" : "Development",
             "UbtExtraFlags" : "",
-            "PlatformName" : "Win64",
+            "PlatformName" : "Win64"
         }
     ]
 }
@@ -76,6 +76,7 @@ local currentGenData =
 {
     config = {},
     target = nil,
+    prjName = nil, 
     prjDir = nil,
     doStage = "none", -- one of "gencmd" or "headers"
     ubtPath = "",
@@ -106,7 +107,7 @@ function Stage_UbtGenCmd()
 
     local cmd = currentGenData.ubtPath .. " -project=" ..
         currentGenData.projectPath .. " " .. currentGenData.target.UbtExtraFlags .. " " ..
-        currentGenData.target.TargetName .. " " .. currentGenData.target.Configuration .. " " ..
+        currentGenData.prjName .. " " .. currentGenData.target.Configuration .. " " ..
         currentGenData.target.PlatformName .. " -headers"
 
     vim.cmd("Dispatch " .. cmd)
@@ -133,20 +134,22 @@ function commands.generateCommands(opts)
     currentGenData.doStage = "gencmd"
 
     local current_file_path = vim.api.nvim_buf_get_name(0)
-    local prjName
-    prjName, prjDir = commands._GetDefaultProjectNameAndDir(current_file_path)
-    if not prjName then
+    currentGenData.prjName, currentGenData.prjDir = commands._GetDefaultProjectNameAndDir(current_file_path)
+    if not currentGenData.prjName then
         print("aborting")
         return false
     end
 
-    currentGenData.config = commands._EnsureConfigFile(prjDir, prjName)
+    currentGenData.config = commands._EnsureConfigFile(currentGenData.prjDir,
+        currentGenData.prjName)
+
     if not currentGenData.config then
         return false
     end
     print("Using engine at:"..currentGenData.config.EngineDir)
     currentGenData.ubtPath = "\"" .. currentGenData.config.EngineDir .."\\Engine\\Binaries\\DotNET\\UnrealBuildTool\\UnrealBuildTool.exe\""
-    currentGenData.projectPath = "\"" .. prjDir .. "/" .. prjName .. ".uproject\""
+    currentGenData.projectPath = "\"" .. currentGenData.prjDir .. "/" .. 
+        currentGenData.prjName .. ".uproject\""
 
     -- prompt user, ask which target to build
     print("target to build:")
@@ -160,11 +163,11 @@ function commands.generateCommands(opts)
 
     local cmd = currentGenData.ubtPath .. " -mode=GenerateClangDatabase -project=" ..
         currentGenData.projectPath .. " -game -engine " .. currentGenData.target.UbtExtraFlags .. " " ..
-        currentGenData.target.TargetName .. " " .. currentGenData.target.Configuration .. " " ..
+        currentGenData.prjName .. " " .. currentGenData.target.Configuration .. " " ..
         currentGenData.target.PlatformName
 
     vim.api.nvim_command('autocmd ShellCmdPost * lua UnrealBuildToolCallback()')
-    CurrentCompileCommandsTargetFilePath =  prjDir .. "/compile_commands.json"
+    CurrentCompileCommandsTargetFilePath =  currentGenData.prjDir .. "/compile_commands.json"
     vim.cmd("compiler msvc")
     vim.cmd("Dispatch " .. cmd)
 
