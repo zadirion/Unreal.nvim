@@ -19,3 +19,4 @@ When you run it for the first time, it will open a configuration file in a new b
 From here onwards, :UnrealBuild will always ask you which target to generate compile_commands.json for. Just input the number corresponding to the desired configuration, and it will generate the json right next to the uproject
 
 This should cause your LSP to start recognizing the Unreal types, including the ones from .generated.h files.
+![image]([files://C:/Users/jzhang/Desktop/Isolated.png](https://raw.githubusercontent.com/zadirion/Unreal.nvim/main/image.png)https://raw.githubusercontent.com/zadirion/Unreal.nvim/main/image.png)
