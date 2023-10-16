@@ -7,7 +7,12 @@ Requirements:
   
 Install with packer:
 ```
-{'zadirion/Unreal.nvim'}
+  use {'zadirion/Unreal.nvim',
+    requires =
+    {
+        {"tpope/vim-dispatch"}
+    }
+  }
 ```
 
 While having any unreal engine c++ source file open in Neovim, run the following command:
