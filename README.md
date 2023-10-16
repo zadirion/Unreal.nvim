@@ -3,7 +3,8 @@ Unreal Engine support for Neovim
 
 Requirements:
 - make sure you install  the clangd support component through Visual Studio Setup, and make sure the installed clang++.exe is in your system path env variable
-
+- (optional) If you don't already have your own configuration, I recommend you use my neovim configuration specialized for development in Unreal Engine https://github.com/zadirion/UnrealHero.nvim
+  
 Install with packer:
 ```
 {'zadirion/Unreal.nvim'}
