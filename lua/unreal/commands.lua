@@ -3,6 +3,36 @@ local kConfigFileName = "UnrealNvim.json"
 local commands = {}
 local kCurrentVersion = "0.0.1"
 
+local gDebug = false
+local logFilePath = 'L:\\unrealnvim.log'
+
+-- clear the log
+local logFile = io.open(logFilePath, "w")
+if logFile then
+logFile:write("")
+logFile:close()
+end
+
+if gDebug then
+commands.inspect = {}
+local inspect_path = vim.fn.stdpath("data") .. "\\site\\pack\\packer\\start\\inspect.lua\\inspect.lua" 
+commands.inspect = loadfile(inspect_path)(commands.inspect)
+end
+
+local function doInspect(objToInspect)
+    if not gDebug then return end
+
+    doInspect(objToInspect)
+end
+
+local function log(message)
+    if not gDebug then return end
+
+    local file = io.open(logFilePath, "a")
+    file:write(message .. '\n')
+    file:close()
+end
+
 function SplitString(str)
     -- Split a string into lines
     local lines = {}
@@ -39,7 +69,7 @@ function commands._CreateConfigFile(configFilePath, projectName)
     -- local file = io.open(configFilePath, "w")
     -- file:write(configContents)
     -- file:close()
-    print("Please populate the configuration for the Unreal project, especially EnginePath, the path to the Unreal Engine")
+    log("Please populate the configuration for the Unreal project, especially EnginePath, the path to the Unreal Engine")
     -- local buf = vim.api.nvim_create_buf(false, true)
     vim.cmd('new ' .. configFilePath)
     vim.cmd('setlocal buftype=')
@@ -72,7 +102,7 @@ function commands._GetDefaultProjectNameAndDir(filepath)
     local uprojectPath, projectDir
     projectDir, uprojectPath = commands._find_file_with_extension(filepath, "uproject")
     if not uprojectPath then
-        print("Failed to determine project name, could not find the root of the project that contains the .uproject")
+        log("Failed to determine project name, could not find the root of the project that contains the .uproject")
         return nil, nil
     end
     local projectName = vim.fn.fnamemodify(uprojectPath, ":t:r")
@@ -85,6 +115,7 @@ local currentGenData =
     config = {},
     target = nil,
     prjName = nil, 
+    targetNameSuffix = nil,
     prjDir = nil,
     doStage = "none", -- one of "gencmd" or "headers"
     ubtPath = "",
@@ -92,31 +123,101 @@ local currentGenData =
     projectPath = "",
 }
 
+function ExtractRSP(rsppath)
+    local extraFlags = "-std=c++20 -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -ferror-limit=0 -Wno-inconsistent-missing-override"
+    local origPath = rsppath
+    rsppath = rsppath:gsub("\\\\","\\")
+    local rspContent = ""
+    log(rsppath)
+
+    local isFirstLine = true
+    for line in io.lines(rsppath) do
+        local discardLine = true
+
+        -- ignored lines
+        if line:find("^/FI") then discardLine = false end
+        if line:find("^/I") then discardLine = false end
+        if line:find("^-W") then discardLine = false end
+
+        line = line:gsub("^/FI", "-include ")
+        line = line:gsub("^(/I )(.*)", "-I \"%2\"")
+
+        if isFirstLine then
+            discardLine = false
+        end
+
+        if not discardLine then
+            rspContent = rspContent .. line .. "\n"
+        end
+
+        isFirstLine = false
+    end
+
+    return rspContent .. "\n" .. extraFlags
+end
+
+function CreateCommandLine()
+end
+
+function EscapePath(path)
+    path = path:gsub("\\", "\\\\")
+    path = path:gsub("\"", "\\\"")
+    return path
+end
+
 function Stage_UbtGenCmd()
-    print("callback called!")
+    log("callback called!")
     local outputJsonPath = currentGenData.config.EngineDir .. "/compile_commands.json"
 
-    print(commands.inspect.inspect(vim.g.dispatch_waiting_jobs))
+    log(doInspect(vim.g.dispatch_waiting_jobs))
     -- replace bad compiler
     local file_path = outputJsonPath
-    local old_text = "Llvm\\\\bin\\\\clang%-cl%.exe"
+
+    local old_text = "Llvm\\\\x64\\\\bin\\\\clang%-cl%.exe"
     local new_text = "Llvm\\\\x64\\\\bin\\\\clang++.exe"
 
-    local file = io.open(file_path, "r")
-    local content = file:read("*all")
-    file:close()
 
-    content = content:gsub(old_text, new_text)
+    local content = ""
+    log("processing compile_commands.json and writing response files")
+    log(file_path)
+    log(type(file_path))
+    for line in io.lines(file_path) do
+        line = line:gsub(old_text, new_text)
+        local i,j = line:find("\"command")
+        if i then
+            -- content = content .. "matched:\n"
+            i,j = line:find("%@")
+            if i then
+                local _,endpos = line:find("\"", j)
+                -- content = content .. tostring(i) .. tostring(j) .. tostring(endpos).. "\n"
+                local rsppath = line:sub(j+1, endpos-1)
+                if rsppath then
+                    rspcontent = ExtractRSP(rsppath)
+                    local newrsppath = rsppath .. ".clang.rsp"
+                    rspfile = io.open(newrsppath, "w")
+                    local rspcontent = ExtractRSP(rsppath)
+                    rspfile:write(rspcontent)
+                    rspfile:close()
+                    content = content .. "\t\t\"command\": \"clang++.exe @\\\"" ..newrsppath .."\\\"\",\n"
+                end
+
+            end
+        else
+            content = content .. line .. "\n"
+        end
+    end
 
     file = io.open(CurrentCompileCommandsTargetFilePath, "w")
     file:write(content)
     file:close()
 
-    currentGenData.doStage = "headers"
+    log("finished processing compile_commands.json")
 
+    log("generating header files with Unreal Header Tool...")
+    currentGenData.doStage = "headers"
     local cmd = currentGenData.ubtPath .. " -project=" ..
         currentGenData.projectPath .. " " .. currentGenData.target.UbtExtraFlags .. " " ..
-        currentGenData.prjName .. " " .. currentGenData.target.Configuration .. " " ..
+        currentGenData.prjName .. currentGenData.targetNameSuffix .. " " .. currentGenData.target.Configuration .. " " ..
         currentGenData.target.PlatformName .. " -headers"
 
     vim.cmd("Dispatch " .. cmd)
@@ -124,7 +225,7 @@ function Stage_UbtGenCmd()
 end
 
 function Stage_GenHeaders()
-    print("Headers generated")
+    log("Finished generating header files with Unreal Header Tool...")
     vim.api.nvim_command('autocmd! ShellCmdPost * lua UnrealBuildToolCallback()')
     vim.api.nvim_command('LspRestart')
     currentGenData.doStage = "none"
@@ -151,7 +252,7 @@ function InitializeCurrentGenData()
     local current_file_path = vim.api.nvim_buf_get_name(0)
     currentGenData.prjName, currentGenData.prjDir = commands._GetDefaultProjectNameAndDir(current_file_path)
     if not currentGenData.prjName then
-        print("aborting")
+        log("aborting")
         return false
     end
 
@@ -171,6 +272,11 @@ function InitializeCurrentGenData()
 
     currentGenData.target = currentGenData.config.Targets[desiredTargetIndex]
 
+    currentGenData.targetNameSuffix = ""
+    if currentGenData.target.withEditor then
+        currentGenData.targetNameSuffix = "Editor"
+    end
+
     print("Using engine at:"..currentGenData.config.EngineDir)
 
     return true
@@ -185,24 +291,19 @@ function commands.build(opts)
 
     currentGenData.doStage = "build"
 
-    local targetNameSuffix = ""
-    if currentGenData.target.withEditor then
-        targetNameSuffix = "Editor"
-    end
-
     local cmd = currentGenData.ueBuildBat .. " " .. currentGenData.prjName .. 
-        targetNameSuffix .. " " ..
+        currentGenData.targetNameSuffix .. " " ..
         currentGenData.target.PlatformName  .. " " .. 
         currentGenData.target.Configuration .. " " .. 
         currentGenData.projectPath .. " -waitmutex"
 
-    print(cmd)
+    log(cmd)
     vim.cmd("compiler msvc")
     vim.cmd("Dispatch " .. cmd)
 end
 
 function commands.run(opts)
-    print("Running uproject")
+    log("Running uproject")
     
     if not InitializeCurrentGenData() then
         return
@@ -237,13 +338,13 @@ function commands.run(opts)
         cmd = executablePath
     end
 
-    print(cmd)
+    log(cmd)
     vim.cmd("compiler msvc")
     vim.cmd("Dispatch " .. cmd)
 end
 
 function commands.generateCommands(opts)
-    print("Generating clang-compatible compile_commands.json")
+    log("Generating clang-compatible compile_commands.json")
 
     if not InitializeCurrentGenData() then
         return
@@ -256,10 +357,11 @@ function commands.generateCommands(opts)
         editorFlag = "-Editor"
     end
 
+    -- local cmd = currentGenData.ubtPath .. " -mode=GenerateClangDatabase -StaticAnalyzer=Clang -project=" ..
     local cmd = currentGenData.ubtPath .. " -mode=GenerateClangDatabase -project=" ..
     currentGenData.projectPath .. " -game -engine " .. currentGenData.target.UbtExtraFlags .. " " ..
     editorFlag .. " " ..
-    currentGenData.prjName .. " " .. currentGenData.target.Configuration .. " " ..
+    currentGenData.prjName .. currentGenData.targetNameSuffix .. " " .. currentGenData.target.Configuration .. " " ..
     currentGenData.target.PlatformName
 
     vim.api.nvim_command('autocmd ShellCmdPost * lua UnrealBuildToolCallback()')
@@ -273,12 +375,13 @@ end
 function commands.SetUnrealCD()
     local current_file_path = vim.api.nvim_buf_get_name(0)
     local prjName, prjDir = commands._GetDefaultProjectNameAndDir(current_file_path)
-    vim.cmd("cd " .. prjDir)
+    if prjDir then
+        vim.cmd("cd " .. prjDir)
+    else
+        print("Could not find unreal project root directory, make sure you have the correct buffer selected")
+    end
 end
 
-commands.inspect = {}
-local inspect_path = vim.fn.stdpath("data") .. "\\site\\pack\\packer\\start\\inspect.lua\\inspect.lua" 
-commands.inspect = loadfile(inspect_path)(commands.inspect)
 
 function commands._check_extension_in_directory(directory, extension)
     local dir = vim.loop.fs_opendir(directory)
