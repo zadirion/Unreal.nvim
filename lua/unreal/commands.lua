@@ -4,6 +4,10 @@ local commands = {}
 local kCurrentVersion = "0.0.1"
 
 local gDebug = false
+if vim.g.unrealnvim_gdebug then
+    gDebug = vim.g.unrealnvim_gdebug
+end
+
 local logFilePath = 'L:\\unrealnvim.log'
 
 -- clear the log
@@ -22,7 +26,7 @@ end
 local function doInspect(objToInspect)
     if not gDebug then return end
 
-    doInspect(objToInspect)
+    commands.inspect.inspect(objToInspect)
 end
 
 local function log(message)
@@ -125,6 +129,11 @@ local currentGenData =
 
 function ExtractRSP(rsppath)
     local extraFlags = "-std=c++20 -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -ferror-limit=0 -Wno-inconsistent-missing-override"
+    local extraIncludes = {
+        "Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h",
+        "Engine/Source/Runtime/Core/Public/Misc/EnumRange.h"
+    }
+
     local origPath = rsppath
     rsppath = rsppath:gsub("\\\\","\\")
     local rspContent = ""
@@ -153,6 +162,10 @@ function ExtractRSP(rsppath)
         isFirstLine = false
     end
 
+    for _, incl in ipairs(extraIncludes) do
+        rspContent = rspContent .. "\n" .. "-include \"" .. currentGenData.config.EngineDir .. "/" .. incl .. "\""
+    end
+
     return rspContent .. "\n" .. extraFlags
 end
 
@@ -169,7 +182,6 @@ function Stage_UbtGenCmd()
     log("callback called!")
     local outputJsonPath = currentGenData.config.EngineDir .. "/compile_commands.json"
 
-    log(doInspect(vim.g.dispatch_waiting_jobs))
     -- replace bad compiler
     local file_path = outputJsonPath
 
