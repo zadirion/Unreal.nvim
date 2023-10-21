@@ -38,7 +38,7 @@ This should cause your LSP to start recognizing the Unreal types, including the 
 - `:UnrealCD` sets the current directory to the root folder of the unreal project (the one with the .uproject in it). I personally use this so Telescope only searches in the project directory, making it faster, especially for live_grep
 
 **Known Limitations**
-- the generated plugin config file that sits next to the uproj (UnrealNvim.json) only contains the Editor and non-Editor Development target configurations. Feel free to add DebugGame, Test, Shipping targets to it, it should work in theory but I have not tested. Let me know if you encounter issues.
+- the generated plugin config file that sits next to the .uproject (UnrealNvim.json) only contains the Editor and non-Editor Development target configurations. Feel free to add DebugGame, Test, Shipping targets to it, it should work in theory but I have not tested. Let me know if you encounter issues.
 
 **Troubleshooting**
 - if you notice that some of the symbols in your project are not recognize/found, it is possible clangd's index cache is broken somehow. You can find clang's cache in the .cache directory that will sit next to your .uproject. It is full of .idx files, each corresponding to a source code file in your project. Close nvim, delete the .cache directory, reopen vim, navigate to one of your project's files. It should trigger clangd to rebuild the index.
