@@ -13,14 +13,10 @@ if not vim then
     vim = {}
 end
 
-local gDebug = false
-if vim.g.unrealnvim_debug then
-    gDebug = vim.g.unrealnvim_debug
-end
 
 local logFilePath = vim.fn.stdpath("data") .. '/unrealnvim.log'
 local function log(message)
-    if not gDebug then return end
+    if not vim.g.unrealnvim_debug then return end
 
     local file = io.open(logFilePath, "a+")
     if file then
@@ -47,7 +43,13 @@ local function PrintAndLogError(a,b)
     end
 end
 
-PrintAndLogMessage("loading Commands.lua. Debug: ", gDebug)
+local function FuncBind(func, data)
+    log("binding")
+    return function()
+        log("calling bound with data "..data)
+        func(data)
+    end
+end
 
 if not vim.g.unrealnvim_loaded then
     Commands = {}
@@ -74,21 +76,23 @@ if not vim.g.unrealnvim_loaded then
     vim.g.unrealnvim_loaded = true
 end
 
-if gDebug then
-Commands.inspect = {}
-local inspect_path = vim.fn.stdpath("data") .. "/site/pack/packer/start/inspect.lua/inspect.lua"
-Commands.inspect = loadfile(inspect_path)(Commands.inspect)
+function Commands.Log(msg)
+    PrintAndLogError(msg)
 end
 
 Commands.onStatusUpdate = function()
 end
 
 local function doInspect(objToInspect)
-    if not gDebug then return end
+    if not vim.g.unrealnvim_debug then return end
+
+    if not Commands.inspect then
+        local inspect_path = vim.fn.stdpath("data") .. "/site/pack/packer/start/inspect.lua/inspect.lua"
+        Commands.inspect = loadfile(inspect_path)(Commands.inspect)
+    end
 
     Commands.inspect.inspect(objToInspect)
 end
-
 
 function SplitString(str)
     -- Split a string into lines
@@ -370,9 +374,15 @@ function Stage_UbtGenCmd()
     PrintAndLogMessage("finished processing compile_commands.json")
     PrintAndLogMessage("generating header files with Unreal Header Tool...")
     Commands.EndTask("gencmd")
+    vim.api.nvim_del_autocmd(Commands.gencmdAutocmdid)
 
     Commands.ScheduleTask("headers")
     Commands.BeginTask("headers")
+    Commands.headersAutocmdid = vim.api.nvim_create_autocmd("ShellCmdPost",{
+        pattern = "*",
+        callback = FuncBind(DispatchUnrealnvimCb, "headers")
+    })
+
     local cmd = CurrentGenData.ubtPath .. " -project=" ..
         CurrentGenData.projectPath .. " " .. CurrentGenData.target.UbtExtraFlags .. " " ..
         CurrentGenData.prjName .. CurrentGenData.targetNameSuffix .. " " .. CurrentGenData.target.Configuration .. " " ..
@@ -381,41 +391,46 @@ function Stage_UbtGenCmd()
     vim.cmd("Dispatch " .. cmd)
 end
 
-function Stage_GenHeaders()
+function Stage_GenHeadersCompleted()
     PrintAndLogMessage("Finished generating header files with Unreal Header Tool...")
     vim.api.nvim_command('autocmd! ShellCmdPost * lua DispatchUnrealnvimCb()')
     vim.api.nvim_command('LspRestart')
     Commands.EndTask("headers")
     Commands.EndTask("final")
+    Commands:SetCurrentAnimation("kirbyIdle")
+    Commands.nvim_del_autocmd(Commands.headersAutocmdid)
 end
 
-Commands.animStatus = ""
+Commands.renderedAnim = ""
 
 function Commands.GetStatusBar()
     local status = "unset"
-    if CurrentGenData.currentTask == "final" and CurrentGenData:GetTaskStatus("final") == TaskState.completed then
-        status = Commands.animStatus .. " Build completed!"
+    if CurrentGenData:GetTaskStatus("final") == TaskState.completed then
+        status = Commands.renderedAnim .. " Build completed!"
     elseif CurrentGenData.currentTask ~= "" then
-        status = Commands.animStatus .. " Building... Step: " .. CurrentGenData.currentTask .. "->".. CurrentGenData:GetTaskStatus(CurrentGenData.currentTask)
+        status = Commands.renderedAnim .. " Building... Step: " .. CurrentGenData.currentTask .. "->".. CurrentGenData:GetTaskStatus(CurrentGenData.currentTask)
     else
-        status = Commands.animStatus .. " Idle"
+        status = Commands.renderedAnim .. " Idle"
     end
     return status
 end
-function DispatchUnrealnvimCb()
-    Commands.taskCoroutine = coroutine.create(DispatchCallbackCoroutine)
+function DispatchUnrealnvimCb(data)
+    log("DispatchUnrealnvimCb()")
+    Commands.taskCoroutine = coroutine.create(FuncBind(DispatchCallbackCoroutine, data))
 end
 
-function DispatchCallbackCoroutine()
+function DispatchCallbackCoroutine(data)
     coroutine.yield()
-    PrintAndLogMessage("DispatchUnrealnvimCb()")
-    PrintAndLogMessage("DispatchUnrealnvimCb() task="..CurrentGenData:GetTaskAndStatus())
-    if CurrentGenData:GetTaskStatus("gencmd") == TaskState.scheduled then
+    if not data then
+        log("data was nil")
+    end
+    PrintAndLogMessage("DispatchCallbackCoroutine()")
+    PrintAndLogMessage("DispatchCallbackCoroutine() task="..CurrentGenData:GetTaskAndStatus())
+    if data == "gencmd" and CurrentGenData:GetTaskStatus("gencmd") == TaskState.scheduled then
         CurrentGenData:SetTaskStatus("gencmd", TaskState.inprogress)
         Commands.taskCoroutine = coroutine.create(Stage_UbtGenCmd)
-    elseif CurrentGenData:GetTaskStatus("headers") == TaskState.scheduled then
-        CurrentGenData:SetTaskStatus("headers", TaskState.inprogress)
-        Commands.taskCoroutine = coroutine.create(Stage_GenHeaders)
+    elseif data == "headers" and CurrentGenData:GetTaskStatus("headers") == TaskState.inprogress then
+        Commands.taskCoroutine = coroutine.create(Stage_GenHeadersCompleted)
     end
 end
 
@@ -560,7 +575,13 @@ function Commands.generateCommands(opts)
         return
     end
 
-    vim.api.nvim_command('autocmd ShellCmdPost * lua DispatchUnrealnvimCb()')
+    -- vim.api.nvim_command('autocmd ShellCmdPost * lua DispatchUnrealnvimCb()')
+    Commands.gencmdAutocmdid = vim.api.nvim_create_autocmd("ShellCmdPost",
+        {
+            pattern = "*",
+            callback = FuncBind(DispatchUnrealnvimCb, "gencmd")
+        })
+
     PrintAndLogMessage("listening to ShellCmdPost")
     --vim.cmd("compiler msvc")
     PrintAndLogMessage("compiler set to msvc")
@@ -569,8 +590,8 @@ function Commands.generateCommands(opts)
     Commands.updateTimer = 0
     Commands.taskCoroutine = coroutine.create(Commands.generateCommandsCoroutine)
     Commands.cbTimer = vim.loop.new_timer()
-    --Commands.cbTimer:start(4,4, Commands.updateLoop)
-    vim.schedule(Commands.updateLoop)
+    Commands.cbTimer:start(4,4, vim.schedule_wrap(Commands.updateLoop))
+    --vim.schedule(Commands.updateLoop)
 end
 
 function Commands.updateLoop()
@@ -578,7 +599,7 @@ function Commands.updateLoop()
     Commands:update(elapsedTime)
     Commands.lastUpdateTime = vim.loop.now()
 
-    vim.schedule(Commands.updateLoop)
+    --vim.schedule(Commands.updateLoop)
 end
 
 local gtimer = 0
@@ -600,8 +621,14 @@ function Commands:update(delta)
 			"3",
 			"4"
     }
+    if Commands.animData then
+        anim = Commands.animData.frames
+        animFrameDuration = Commands.animData.interval
+        animFrameCount = #anim
+        animDuration = animFrameCount * animFrameDuration
+    end
     local index = 1 + (math.floor(math.fmod(vim.loop.now(), animDuration) / animFrameDuration))
-    Commands.animStatus = (anim[index] or "")
+    Commands.renderedAnim = (anim[index] or "")
     self.updateTimer = self.updateTimer + delta
     if self.updateTimer > 4  then
         if self.taskCoroutine then
@@ -612,12 +639,27 @@ function Commands:update(delta)
     end
 
 end
+ local function GetInstallDir()
+    local packer_install_dir = vim.fn.stdpath('data') .. '/site/pack/packer/start/'
+    return packer_install_dir .. "Unreal.nvim//"
+end
+
+local mydbg = true
+function Commands:SetCurrentAnimation(animationName)
+    local jsonPath = GetInstallDir() .. "lua/spinners.json"
+    local file = io.open(jsonPath, "r")
+    if file then
+        local content = file:read("*all")
+        local json = vim.fn.json_decode(content)
+        Commands.animData = json[animationName]
+    end
+end
 
 function Commands.generateCommandsCoroutine()
-
+    PrintAndLogMessage("Generating clang-compatible compile_commands.json")
+    Commands:SetCurrentAnimation("kirbyFlip")
     coroutine.yield()
     Commands.ClearTasks()
-    PrintAndLogMessage("Generating clang-compatible compile_commands.json")
 
     local editorFlag = ""
     if CurrentGenData.config.withEditor then
