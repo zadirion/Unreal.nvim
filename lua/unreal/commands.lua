@@ -1,6 +1,13 @@
 
 local kConfigFileName = "UnrealNvim.json"
 local kCurrentVersion = "0.0.1"
+
+local kLogLevel_Error = 1
+local kLogLevel_Warning = 2
+local kLogLevel_Log = 3
+local kLogLevel_Verbose = 4
+local kLogLevel_VeryVerbose = 5
+
 local TaskState =
 {
     scheduled = "scheduled",
@@ -8,23 +15,42 @@ local TaskState =
     completed = "completed"
 }
 
--- fix diagnostic about vim
+-- fix false diagnostic about vim
 if not vim then
     vim = {}
 end
 
 
 local logFilePath = vim.fn.stdpath("data") .. '/unrealnvim.log'
-local function log(message)
-    if not vim.g.unrealnvim_debug then return end
 
-    local file = io.open(logFilePath, "a+")
+local function logWithVerbosity(verbosity, message)
+    if not vim.g.unrealnvim_debug then return end
+    if verbosity > vim.g.unrealnvim_loglevel then return end
+
+    local file = nil
+    if Commands.logFile then
+        file = Commands.logFile
+    else
+        file = io.open(logFilePath, "a")
+    end
+
     if file then
         local time = os.date('%m/%d/%y %H:%M:%S');
-        file:write(time .. ": " .. message .. '\n')
-        file:flush()
-        file:close()
+        file:write("["..time .. "]["..verbosity.."]: " .. message .. '\n')
     end
+end
+
+local function log(message)
+    if not message then
+        logWithVerbosity(kLogLevel_Error, "message was nill")
+        return
+    end
+
+    logWithVerbosity(kLogLevel_Log, message)
+end
+
+local function logError(message)
+    logWithVerbosity(kLogLevel_Error, message)
 end
 
 local function PrintAndLogMessage(a,b)
@@ -43,10 +69,22 @@ local function PrintAndLogError(a,b)
     end
 end
 
+local function MakeUnixPath(win_path)
+    if not win_path then
+        logError("MakeUnixPath received a nil argument")
+        return;
+    end
+    -- Convert backslashes to forward slashes
+    local unix_path = win_path:gsub("\\", "/")
+
+    -- Remove duplicate slashes
+    unix_path = unix_path:gsub("//+", "/")
+
+    return unix_path
+end
+
 local function FuncBind(func, data)
-    log("binding")
     return function()
-        log("calling bound with data "..data)
         func(data)
     end
 end
@@ -66,15 +104,25 @@ if not vim.g.unrealnvim_loaded then
         ubtPath = "",
         ueBuildBat = "",
         projectPath = "",
+        logFile = nil
     }
     -- clear the log
-    local logFile = io.open(logFilePath, "w")
-    if logFile then
-        logFile:write("")
-        logFile:close()
+    CurrentGenData.logFile = io.open(logFilePath, "w")
+
+    if CurrentGenData.logFile then
+        CurrentGenData.logFile:write("")
+        CurrentGenData.logFile:close()
+
+        CurrentGenData.logFile = io.open(logFilePath, "a")
     end
     vim.g.unrealnvim_loaded = true
 end
+
+Commands.LogLevel_Error = kLogLevel_Error
+Commands.LogLevel_Warning = kLogLevel_Warning
+Commands.LogLevel_Log = kLogLevel_Log
+Commands.LogLevel_Verbose = kLogLevel_Verbose
+Commands.LogLevel_VeryVerbose = kLogLevel_VeryVerbose
 
 function Commands.Log(msg)
     PrintAndLogError(msg)
@@ -83,15 +131,28 @@ end
 Commands.onStatusUpdate = function()
 end
 
-local function doInspect(objToInspect)
+function Commands:Inspect(objToInspect)
     if not vim.g.unrealnvim_debug then return end
-
-    if not Commands.inspect then
-        local inspect_path = vim.fn.stdpath("data") .. "/site/pack/packer/start/inspect.lua/inspect.lua"
-        Commands.inspect = loadfile(inspect_path)(Commands.inspect)
+    if not objToInspect then
+        log(objToInspect)
+        return
     end
 
-    Commands.inspect.inspect(objToInspect)
+    if not self._inspect then
+        local inspect_path = vim.fn.stdpath("data") .. "/site/pack/packer/start/inspect.lua/inspect.lua"
+        self._inspect = loadfile(inspect_path)(Commands._inspect)
+        if  self._inspect then
+            log("Inspect loaded.")
+        else
+            logError("Inspect failed to load from path" .. inspect_path)
+        end
+        if self._inspect.inspect then
+            log("inspect method exists")
+        else
+            logError("inspect method doesn't exist")
+        end
+    end
+    return self._inspect.inspect(objToInspect)
 end
 
 function SplitString(str)
@@ -142,7 +203,7 @@ end
 function Commands._EnsureConfigFile(projectRootDir, projectName)
     local configFilePath = projectRootDir.."/".. kConfigFileName
     local configFile = io.open(configFilePath, "r")
-  
+
 
     if (not configFile) then
         Commands._CreateConfigFile(configFilePath, projectName)
@@ -154,12 +215,17 @@ function Commands._EnsureConfigFile(projectRootDir, projectName)
     configFile:close()
 
     local data = vim.fn.json_decode(content)
-    doInspect(data)
+    Commands:Inspect(data)
     if data and (data.version ~= kCurrentVersion) then
         PrintAndLogError("Your " .. configFilePath .. " format is incompatible. Please back up this file somewhere and then delete this one, you will be asked to create a new one") 
         data = nil
     end
-    return data;
+
+    if data then
+        data.EngineDir = MakeUnixPath(data.EngineDir)
+    end
+
+    return data
 end
 
 function Commands._GetDefaultProjectNameAndDir(filepath)
@@ -272,6 +338,17 @@ function EnsureDirPath(path)
     handle:close()
 end
 
+local function IsEngineFile(path, start)
+    local unixPath = MakeUnixPath(path)
+    local unixStart = MakeUnixPath(start)
+    local startIndex, _ = string.find(unixPath, unixStart, 1, true)
+    return startIndex ~= nil
+end
+
+local function AppendToQF(entry)
+    vim.fn.setqflist({}, 'a', { items = { entry } })
+end
+
 function Stage_UbtGenCmd()
     coroutine.yield()
     Commands.BeginTask("gencmd")
@@ -294,14 +371,24 @@ function Stage_UbtGenCmd()
     local contentLines = {}
     PrintAndLogMessage("processing compile_commands.json and writing response files")
     PrintAndLogMessage(file_path)
-    PrintAndLogMessage(type(file_path))
+    local skipEngineFiles = true
     local currentFilename = ""
     for line in io.lines(file_path) do
-        line = line:gsub(old_text, new_text)
         local i,j = line:find("\"command")
         if i then
-            PrintAndLogMessage("processing " .. currentFilename)
             coroutine.yield()
+
+            -- show progress
+            logWithVerbosity(kLogLevel_Verbose, "Preparing for LSP symbol parsing: " .. currentFilename)
+            local isEngineFile = IsEngineFile(currentFilename, CurrentGenData.config.EngineDir)
+            local shouldSkipFile = isEngineFile and skipEngineFiles
+
+            local qflistentry = {filename = "", lnum = 0, col = 0, 
+                text =  currentFilename}
+            AppendToQF(qflistentry)
+
+            line = line:gsub(old_text, new_text)
+
             -- content = content .. "matched:\n"
             i,j = line:find("%@")
             if i then
@@ -309,11 +396,15 @@ function Stage_UbtGenCmd()
                 local rsppath = line:sub(j+1, endpos-1)
                 if rsppath then
                     local newrsppath = rsppath .. ".clang.rsp"
-                    local rspfile = io.open(newrsppath, "w")
-                    local rspcontent = ExtractRSP(rsppath)
-                    rspfile:write(rspcontent)
-                    rspfile:close()
-                    coroutine.yield()
+
+                    -- rewrite rsp contents
+                    if not shouldSkipFile then
+                        local rspfile = io.open(newrsppath, "w")
+                        local rspcontent = ExtractRSP(rsppath)
+                        rspfile:write(rspcontent)
+                        rspfile:close()
+                    end
+
                     table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" ..newrsppath .."\\\"\",\n")
                 end
             else
@@ -322,7 +413,6 @@ function Stage_UbtGenCmd()
                 -- rsps. keep line as is
                 local _, endArgsPos = line:find("%.exe\\\"")
                 local args = line:sub(endArgsPos+1, -1)
-                coroutine.yield()
                 local rspfilename = currentFilename:gsub("\\\\","/")
                 rspfilename = rspfilename:gsub(":","")
                 rspfilename = rspfilename:gsub("\"","")
@@ -332,25 +422,25 @@ function Stage_UbtGenCmd()
                 rspfilename = rspfilename .. ".rsp"
                 local rspfilepath = rspdir .. rspfilename
 
-                PrintAndLogMessage("Writing rsp: " .. rspfilepath)
+		if not shouldSkipFile then
+                    PrintAndLogMessage("Writing rsp: " .. rspfilepath)
 
-                args = args:gsub("-D\\\"", "-D\"")
-                args = args:gsub("-I\\\"", "-I\"")
-                args = args:gsub("\\\"\\\"\\\"", "__3Q_PLACEHOLDER__")
-                args = args:gsub("\\\"\\\"", "\\\"\"")
-                args = args:gsub("\\\" ", "\" ")
-                args = args:gsub("\\\\", "/")
-                args = args:gsub(",%s*$", "") -- remove trailing comma and spaces
-                args = args:gsub("\" ", "\"\n") -- one arg per line
+                    args = args:gsub("-D\\\"", "-D\"")
+                    args = args:gsub("-I\\\"", "-I\"")
+                    args = args:gsub("\\\"\\\"\\\"", "__3Q_PLACEHOLDER__")
+                    args = args:gsub("\\\"\\\"", "\\\"\"")
+                    args = args:gsub("\\\" ", "\" ")
+                    args = args:gsub("\\\\", "/")
+                    args = args:gsub(",%s*$", "") -- remove trailing comma and spaces
+                    args = args:gsub("\" ", "\"\n") -- one arg per line
 
-                args = args:gsub("__3Q_PLACEHOLDER__", "\\\"\\\"\"")
+                    args = args:gsub("__3Q_PLACEHOLDER__", "\\\"\\\"\"")
 
-                args = args:gsub("\n[^\n]*$", "")
-                local rspfile = io.open(rspfilepath, "w")
-                rspfile:write(args)
-                rspfile:close()
-
-                coroutine.yield()
+                    args = args:gsub("\n[^\n]*$", "")
+                    local rspfile = io.open(rspfilepath, "w")
+                    rspfile:write(args)
+                    rspfile:close()
+		end
 
                 table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" .. EscapePath(rspfilepath) .."\\\""
                     .. " ".. EscapePath(currentFilename) .."\",\n")
@@ -359,10 +449,11 @@ function Stage_UbtGenCmd()
             local fbegin, fend = line:find("\"file\": ")
             if fbegin then
                 currentFilename = line:sub(fend+1, -2)
-                PrintAndLogMessage("currentfile: " .. currentFilename)
+                logWithVerbosity(kLogLevel_Verbose, "currentfile: " .. currentFilename)
             end
             table.insert(contentLines, line .. "\n")
         end
+        ::continue::
     end
 
 
@@ -398,13 +489,15 @@ function Stage_GenHeadersCompleted()
     Commands.EndTask("headers")
     Commands.EndTask("final")
     Commands:SetCurrentAnimation("kirbyIdle")
-    Commands.nvim_del_autocmd(Commands.headersAutocmdid)
+    if Commands.headersAutocmdid then
+        vim.api.nvim_del_autocmd(Commands.headersAutocmdid)
+    end
 end
 
 Commands.renderedAnim = ""
 
-function Commands.GetStatusBar()
-    local status = "unset"
+ function Commands.GetStatusBar()
+     local status = "unset"
     if CurrentGenData:GetTaskStatus("final") == TaskState.completed then
         status = Commands.renderedAnim .. " Build completed!"
     elseif CurrentGenData.currentTask ~= "" then
@@ -414,10 +507,11 @@ function Commands.GetStatusBar()
     end
     return status
 end
+
 function DispatchUnrealnvimCb(data)
-    log("DispatchUnrealnvimCb()")
-    Commands.taskCoroutine = coroutine.create(FuncBind(DispatchCallbackCoroutine, data))
-end
+     log("DispatchUnrealnvimCb()")
+     Commands.taskCoroutine = coroutine.create(FuncBind(DispatchCallbackCoroutine, data))
+ end
 
 function DispatchCallbackCoroutine(data)
     coroutine.yield()
@@ -590,9 +684,10 @@ function Commands.generateCommands(opts)
     Commands.updateTimer = 0
     Commands.taskCoroutine = coroutine.create(Commands.generateCommandsCoroutine)
     Commands.cbTimer = vim.loop.new_timer()
-    Commands.cbTimer:start(4,4, vim.schedule_wrap(Commands.updateLoop))
+    Commands.cbTimer:start(1,1, vim.schedule_wrap(Commands.safeUpdateLoop))
     --vim.schedule(Commands.updateLoop)
 end
+
 
 function Commands.updateLoop()
     local elapsedTime = vim.loop.now() - Commands.lastUpdateTime
@@ -600,6 +695,13 @@ function Commands.updateLoop()
     Commands.lastUpdateTime = vim.loop.now()
 
     --vim.schedule(Commands.updateLoop)
+end
+
+function Commands.safeUpdateLoop()
+    local success, errmsg = pcall(Commands.updateLoop)
+    if not success then
+        vim.api.nvim_err_writeln("Error in update:".. errmsg)
+    end
 end
 
 local gtimer = 0
@@ -629,14 +731,30 @@ function Commands:update(delta)
     end
     local index = 1 + (math.floor(math.fmod(vim.loop.now(), animDuration) / animFrameDuration))
     Commands.renderedAnim = (anim[index] or "")
-    self.updateTimer = self.updateTimer + delta
-    if self.updateTimer > 4  then
+
+
         if self.taskCoroutine then
-            coroutine.resume(self.taskCoroutine)
+            if coroutine.status(self.taskCoroutine) ~= "dead"  then
+                local ok, errmsg = coroutine.resume(self.taskCoroutine)
+                if not ok then
+                    self.taskCoroutine = nil
+                    error(errmsg)
+                end
+            else 
+                self.taskCoroutine = nil
+            end
         end
         Commands.onStatusUpdate()
-        self.updateTimer = 0
-    end
+
+
+--    self.updateTimer = self.updateTimer + delta
+--    if self.updateTimer > 4  then
+--        if self.taskCoroutine then
+--            coroutine.resume(self.taskCoroutine)
+--        end
+--        Commands.onStatusUpdate()
+--        self.updateTimer = 0
+--    end
 
 end
  local function GetInstallDir()
