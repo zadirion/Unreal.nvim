@@ -1,6 +1,6 @@
 
 local kConfigFileName = "UnrealNvim.json"
-local kCurrentVersion = "0.0.1"
+local kCurrentVersion = "0.0.2"
 
 local kLogLevel_Error = 1
 local kLogLevel_Warning = 2
@@ -63,9 +63,13 @@ end
 
 local function PrintAndLogError(a,b)
     if a and b then
-        log("Error: "..tostring(a)..tostring(b))
+        local msg = "Error: "..tostring(a)..tostring(b)
+        print(msg)
+        log(msg)
     elseif a then
-        log("Error: ".. tostring(a))
+        local msg = "Error: ".. tostring(a)
+        print(msg)
+        log(msg)
     end
 end
 
@@ -167,10 +171,25 @@ end
 function Commands._CreateConfigFile(configFilePath, projectName)
     local configContents = [[
 {
-    "version" : "0.0.1",
+    "version" : "0.0.2",
     "_comment": "dont forget to escape backslashes in EnginePath",    
     "EngineDir": "",
     "Targets":  [
+
+        {
+            "TargetName" : "]] .. projectName .. [[-Editor",
+            "Configuration" : "DebugGame",
+            "withEditor" : true,
+            "UbtExtraFlags" : "",
+            "PlatformName" : "Win64"
+        },
+        {
+            "TargetName" : "]] .. projectName .. [[",
+            "Configuration" : "DebugGame",
+            "withEditor" : false,
+            "UbtExtraFlags" : "",
+            "PlatformName" : "Win64"
+        },
         {
             "TargetName" : "]] .. projectName .. [[-Editor",
             "Configuration" : "Development",
@@ -181,6 +200,20 @@ function Commands._CreateConfigFile(configFilePath, projectName)
         {
             "TargetName" : "]] .. projectName .. [[",
             "Configuration" : "Development",
+            "withEditor" : false,
+            "UbtExtraFlags" : "",
+            "PlatformName" : "Win64"
+        },
+        {
+            "TargetName" : "]] .. projectName .. [[-Editor",
+            "Configuration" : "Shipping",
+            "withEditor" : true,
+            "UbtExtraFlags" : "",
+            "PlatformName" : "Win64"
+        },
+        {
+            "TargetName" : "]] .. projectName .. [[",
+            "Configuration" : "Shipping",
             "withEditor" : false,
             "UbtExtraFlags" : "",
             "PlatformName" : "Win64"
@@ -274,7 +307,7 @@ function CurrentGenData:ClearTasks()
 end
 
 function ExtractRSP(rsppath)
-    local extraFlags = "-std=c++20 -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fPrintAndLogError-limit=0 -Wno-inconsistent-missing-override"
+    local extraFlags = "-std=c++20 -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -ferror-limit=0 -Wno-inconsistent-missing-override"
     local extraIncludes = {
         "Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h",
         "Engine/Source/Runtime/Core/Public/Misc/EnumRange.h"
@@ -345,8 +378,50 @@ local function IsEngineFile(path, start)
     return startIndex ~= nil
 end
 
+local function IsQuickfixWin(winid)
+    if not vim.api.nvim_win_is_valid(winid) then return false end
+    local bufnr = vim.api.nvim_win_get_buf(winid)
+    local buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
+
+    return buftype == 'quickfix'
+end
+
+local function GetQuickfixWinId()
+    local quickfix_winid = nil
+
+    for _, winid in ipairs(vim.api.nvim_list_wins()) do
+
+        if IsQuickfixWin(winid) then
+            quickfix_winid = winid
+            break
+        end
+    end
+    return quickfix_winid
+end
+
+Commands.QuickfixWinId = 0
+
+local function ScrollQF()
+    if not IsQuickfixWin(Commands.QuickfixWinId) then
+        Commands.QuickfixWinId = GetQuickfixWinId()
+    end
+
+    local qf_list = vim.fn.getqflist()
+    local last_line = #qf_list
+    if last_line > 0 then
+        vim.api.nvim_win_set_cursor(Commands.QuickfixWinId, {last_line, 0})
+    end
+end
+
 local function AppendToQF(entry)
     vim.fn.setqflist({}, 'a', { items = { entry } })
+    ScrollQF()
+end
+
+local function DeleteAutocmd(AutocmdId)
+    local success, _ = pcall(function()
+        vim.api.nvim_del_autocmd(AutocmdId)
+    end)
 end
 
 function Stage_UbtGenCmd()
@@ -371,7 +446,18 @@ function Stage_UbtGenCmd()
     local contentLines = {}
     PrintAndLogMessage("processing compile_commands.json and writing response files")
     PrintAndLogMessage(file_path)
+
     local skipEngineFiles = true
+    if CurrentGenData.WithEngine then
+        skipEngineFiles = false
+    end
+
+    local qflistentry = {text = "Preparing files for parsing." }
+    if not skipEngineFiles then
+        qflistentry = qflistentry .. " Engine source files included, process will take longer" 
+    end
+    AppendToQF(qflistentry)
+
     local currentFilename = ""
     for line in io.lines(file_path) do
         local i,j = line:find("\"command")
@@ -385,7 +471,9 @@ function Stage_UbtGenCmd()
 
             local qflistentry = {filename = "", lnum = 0, col = 0, 
                 text =  currentFilename}
-            AppendToQF(qflistentry)
+            if not shouldSkipFile then
+                AppendToQF(qflistentry)
+            end
 
             line = line:gsub(old_text, new_text)
 
@@ -465,7 +553,7 @@ function Stage_UbtGenCmd()
     PrintAndLogMessage("finished processing compile_commands.json")
     PrintAndLogMessage("generating header files with Unreal Header Tool...")
     Commands.EndTask("gencmd")
-    vim.api.nvim_del_autocmd(Commands.gencmdAutocmdid)
+    DeleteAutocmd(Commands.gencmdAutocmdid)
 
     Commands.ScheduleTask("headers")
     Commands.BeginTask("headers")
@@ -479,6 +567,7 @@ function Stage_UbtGenCmd()
         CurrentGenData.prjName .. CurrentGenData.targetNameSuffix .. " " .. CurrentGenData.target.Configuration .. " " ..
         CurrentGenData.target.PlatformName .. " -headers"
 
+    vim.cmd("compiler msvc")
     vim.cmd("Dispatch " .. cmd)
 end
 
@@ -489,9 +578,7 @@ function Stage_GenHeadersCompleted()
     Commands.EndTask("headers")
     Commands.EndTask("final")
     Commands:SetCurrentAnimation("kirbyIdle")
-    if Commands.headersAutocmdid then
-        vim.api.nvim_del_autocmd(Commands.headersAutocmdid)
-    end
+    DeleteAutocmd(Commands.headersAutocmdid)
 end
 
 Commands.renderedAnim = ""
@@ -531,7 +618,11 @@ end
 function PromptBuildTargetIndex()
     print("target to build:")
     for i, x in ipairs(CurrentGenData.config.Targets) do
-       print(tostring(i) .. ". " .. x.TargetName)
+        local configName = x.Configuration
+        if x.withEditor then
+            configName = configName .. "-Editor"
+        end
+       print(tostring(i) .. ". " .. configName)
     end
     return tonumber(vim.fn.input "<number> : ")
 end
@@ -564,7 +655,7 @@ function InitializeCurrentGenData()
     end
 
     CurrentGenData.ubtPath = "\"" .. CurrentGenData.config.EngineDir .."/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe\""
-    CurrentGenData.ueBuildBat = "\"" .. CurrentGenData.config.EngineDir .."/ngine/Build/BatchFiles/Build.bat\""
+    CurrentGenData.ueBuildBat = "\"" .. CurrentGenData.config.EngineDir .."/Engine/Build/BatchFiles/Build.bat\""
     CurrentGenData.projectPath = "\"" .. CurrentGenData.prjDir .. "/" .. 
         CurrentGenData.prjName .. ".uproject\""
 
@@ -602,14 +693,19 @@ function Commands.EndTask(taskName)
     Commands.taskCoroutine = nil
 end
 
-function Commands.build(opts)
-    PrintAndLogMessage("Building uproject")
+function BuildComplete()
+    Commands.EndTask("build")
+    Commands.EndTask("final")
+    Commands:SetCurrentAnimation("kirbyIdle")
+    DeleteAutocmd(Commands.buildAutocmdid)
+end
 
-    if not InitializeCurrentGenData() then
-        return
-    end
-
-    Commands.ScheduleTask("build")
+function Commands.BuildCoroutine()
+    Commands.buildAutocmdid = vim.api.nvim_create_autocmd("ShellCmdPost",
+        {
+            pattern = "*",
+            callback = BuildComplete 
+        })
 
     local cmd = CurrentGenData.ueBuildBat .. " " .. CurrentGenData.prjName .. 
         CurrentGenData.targetNameSuffix .. " " ..
@@ -617,12 +713,28 @@ function Commands.build(opts)
         CurrentGenData.target.Configuration .. " " .. 
         CurrentGenData.projectPath .. " -waitmutex"
 
-    PrintAndLogMessage(cmd)
     vim.cmd("compiler msvc")
     vim.cmd("Dispatch " .. cmd)
+
+end
+
+function Commands.build(opts)
+    CurrentGenData:ClearTasks()
+    PrintAndLogMessage("Building uproject")
+
+    if not InitializeCurrentGenData() then
+        return
+    end
+    Commands.EnsureUpdateStarted();
+
+    Commands.ScheduleTask("build")
+    Commands:SetCurrentAnimation("kirbyFlip")
+    Commands.taskCoroutine = coroutine.create(Commands.BuildCoroutine)
+
 end
 
 function Commands.run(opts)
+    CurrentGenData:ClearTasks()
     PrintAndLogMessage("Running uproject")
     
     if not InitializeCurrentGenData() then
@@ -661,12 +773,30 @@ function Commands.run(opts)
     PrintAndLogMessage(cmd)
     vim.cmd("compiler msvc")
     vim.cmd("Dispatch " .. cmd)
+    Commands.EndTask("run")
+    Commands.EndTask("final")
+end
+
+function Commands.EnsureUpdateStarted()
+    if Commands.cbTimer then return end
+
+    Commands.lastUpdateTime = vim.loop.now()
+    Commands.updateTimer = 0
+    Commands.cbTimer = vim.loop.new_timer()
+    Commands.cbTimer:start(1,1, vim.schedule_wrap(Commands.safeUpdateLoop))
+    --vim.schedule(Commands.updateLoop)
 end
 
 function Commands.generateCommands(opts)
+    log(Commands.Inspect(opts))
+
     if not InitializeCurrentGenData() then
         PrintAndLogMessage("init failed")
         return
+    end
+
+    if opts.WithEngine then
+        CurrentGenData.WithEngine = true
     end
 
     -- vim.api.nvim_command('autocmd ShellCmdPost * lua DispatchUnrealnvimCb()')
@@ -680,12 +810,8 @@ function Commands.generateCommands(opts)
     --vim.cmd("compiler msvc")
     PrintAndLogMessage("compiler set to msvc")
 
-    Commands.lastUpdateTime = vim.loop.now()
-    Commands.updateTimer = 0
     Commands.taskCoroutine = coroutine.create(Commands.generateCommandsCoroutine)
-    Commands.cbTimer = vim.loop.new_timer()
-    Commands.cbTimer:start(1,1, vim.schedule_wrap(Commands.safeUpdateLoop))
-    --vim.schedule(Commands.updateLoop)
+    Commands.EnsureUpdateStarted()
 end
 
 

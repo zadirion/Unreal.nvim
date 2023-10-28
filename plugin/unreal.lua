@@ -14,6 +14,16 @@ vim.api.nvim_create_user_command("UnrealGen", function(opts)
 end, {
 })
 
+vim.api.nvim_create_user_command("UnrealGenWithEngine", function(opts)
+    if not opts then
+        opts = {}
+    end
+
+    opts.WithEngine = true
+    require("unreal.commands").generateCommands(opts)
+end, {
+})
+
 vim.api.nvim_create_user_command("UnrealBuild", function(opts)
     require("unreal.commands").build(opts)
 end, {
