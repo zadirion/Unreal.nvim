@@ -454,7 +454,7 @@ function Stage_UbtGenCmd()
 
     local qflistentry = {text = "Preparing files for parsing." }
     if not skipEngineFiles then
-        qflistentry = qflistentry .. " Engine source files included, process will take longer" 
+        qflistentry.text = qflistentry.text .. " Engine source files included, process will take longer" 
     end
     AppendToQF(qflistentry)
 
@@ -492,6 +492,7 @@ function Stage_UbtGenCmd()
                         rspfile:write(rspcontent)
                         rspfile:close()
                     end
+                    coroutine.yield()
 
                     table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" ..newrsppath .."\\\"\",\n")
                 end
@@ -510,7 +511,7 @@ function Stage_UbtGenCmd()
                 rspfilename = rspfilename .. ".rsp"
                 local rspfilepath = rspdir .. rspfilename
 
-		if not shouldSkipFile then
+                if not shouldSkipFile then
                     PrintAndLogMessage("Writing rsp: " .. rspfilepath)
 
                     args = args:gsub("-D\\\"", "-D\"")
@@ -528,7 +529,8 @@ function Stage_UbtGenCmd()
                     local rspfile = io.open(rspfilepath, "w")
                     rspfile:write(args)
                     rspfile:close()
-		end
+                end
+                coroutine.yield()
 
                 table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" .. EscapePath(rspfilepath) .."\\\""
                     .. " ".. EscapePath(currentFilename) .."\",\n")
@@ -782,9 +784,13 @@ function Commands.EnsureUpdateStarted()
 
     Commands.lastUpdateTime = vim.loop.now()
     Commands.updateTimer = 0
+
+    -- UI update loop
     Commands.cbTimer = vim.loop.new_timer()
-    Commands.cbTimer:start(1,1, vim.schedule_wrap(Commands.safeUpdateLoop))
-    --vim.schedule(Commands.updateLoop)
+    Commands.cbTimer:start(1,30, vim.schedule_wrap(Commands.safeUpdateLoop))
+
+    -- coroutine update loop
+    vim.schedule(Commands.safeLogicUpdate)
 end
 
 function Commands.generateCommands(opts)
@@ -817,10 +823,9 @@ end
 
 function Commands.updateLoop()
     local elapsedTime = vim.loop.now() - Commands.lastUpdateTime
-    Commands:update(elapsedTime)
+    Commands:uiUpdate(elapsedTime)
     Commands.lastUpdateTime = vim.loop.now()
 
-    --vim.schedule(Commands.updateLoop)
 end
 
 function Commands.safeUpdateLoop()
@@ -832,7 +837,8 @@ end
 
 local gtimer = 0
 local resetCount = 0
-function Commands:update(delta)
+
+function Commands:uiUpdate(delta)
     local animFrameCount = 4
     local animFrameDuration = 200
     local animDuration = animFrameCount * animFrameDuration
@@ -855,34 +861,35 @@ function Commands:update(delta)
         animFrameCount = #anim
         animDuration = animFrameCount * animFrameDuration
     end
+
     local index = 1 + (math.floor(math.fmod(vim.loop.now(), animDuration) / animFrameDuration))
     Commands.renderedAnim = (anim[index] or "")
-
-
-        if self.taskCoroutine then
-            if coroutine.status(self.taskCoroutine) ~= "dead"  then
-                local ok, errmsg = coroutine.resume(self.taskCoroutine)
-                if not ok then
-                    self.taskCoroutine = nil
-                    error(errmsg)
-                end
-            else 
-                self.taskCoroutine = nil
-            end
-        end
-        Commands.onStatusUpdate()
-
-
---    self.updateTimer = self.updateTimer + delta
---    if self.updateTimer > 4  then
---        if self.taskCoroutine then
---            coroutine.resume(self.taskCoroutine)
---        end
---        Commands.onStatusUpdate()
---        self.updateTimer = 0
---    end
-
 end
+
+function Commands.safeLogicUpdate()
+    local success, errmsg = pcall(function() Commands:LogicUpdate() end)
+
+    if not success then
+        vim.api.nvim_err_writeln("Error in update:".. errmsg)
+    end
+    vim.defer_fn(Commands.safeLogicUpdate, 1)
+end
+
+function Commands:LogicUpdate()
+    if self.taskCoroutine then
+        if coroutine.status(self.taskCoroutine) ~= "dead"  then
+            local ok, errmsg = coroutine.resume(self.taskCoroutine)
+            if not ok then
+                self.taskCoroutine = nil
+                error(errmsg)
+            end
+        else
+            self.taskCoroutine = nil
+        end
+    end
+    vim.defer_fn(Commands.onStatusUpdate, 1)
+end
+
  local function GetInstallDir()
     local packer_install_dir = vim.fn.stdpath('data') .. '/site/pack/packer/start/'
     return packer_install_dir .. "Unreal.nvim//"
