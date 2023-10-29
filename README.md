@@ -29,8 +29,8 @@ From here onwards, you can use `:UnrealGen` to generate the compile commands for
 This should cause your LSP to start recognizing the Unreal types, including the ones from .generated.h files.
 
 **Commands**
-- `:UnrealGenWithEngine`
-- `:UnrealGen` generates the compile_commands.json file so your LSP can properly parse the source code
+- `:UnrealGenWithEngine` generates the compile_commands.json and the compiler rsp files for the engine source code, so your LSP can properly parse the source code
+- `:UnrealGen` generates the compile_commands.json and the compiler rps files for your project, so your LSP can properly parse the source code
 - `:UnrealBuild` builds the project with unreal
 - `:UnrealRun` runs the project. It does not build it even if the source is out of date
 - `:UnrealCD` sets the current directory to the root folder of the unreal project (the one with the .uproject in it). I personally use this so Telescope only searches in the project directory, making it faster, especially for live_grep
