@@ -38,6 +38,7 @@ This should cause your LSP to start recognizing the Unreal types, including the 
 **Known Limitations**
 - you can't run with a debugger attached at the moment. I plan on adding support for starting the project with WinDbg attached. Currently if you want a debugger, you'll still have to run the project from Visual Studio and debug it there.
 - the project is primarily developed for Windows. Unfortunately I do not have the time or motivation to maintain it for Linux, although I wish it worked there too. But since game development is primarily done on Windows in general, this is the primary target for the plugin. If any volunteer maintainers for Linux step forward, I'd be happy to collab with you
+- you can only abort a build using `:AbortDispatch` and it will only work for the actual unreal build step, it won't work for the RSP generation build step
 
 **Troubleshooting**
 - if you notice that some of the symbols in your project are not recognize/found, it is possible clangd's index cache is broken somehow. You can find clang's cache in the .cache directory that will sit next to your .uproject. It is full of .idx files, each corresponding to a source code file in your project. Close nvim, delete the .cache directory, reopen vim, navigate to one of your project's files. It should trigger clangd to rebuild the index.
