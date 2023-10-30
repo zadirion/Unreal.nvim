@@ -496,6 +496,7 @@ function Stage_UbtGenCmd()
                         rspfile:write(rspcontent)
                         rspfile:close()
                     end
+                    coroutine.yield()
 
                     table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" ..newrsppath .."\\\"\",\n")
                 end
@@ -533,6 +534,7 @@ function Stage_UbtGenCmd()
                     rspfile:write(args)
                     rspfile:close()
                 end
+                coroutine.yield()
 
                 table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" .. EscapePath(rspfilepath) .."\\\""
                     .. " ".. EscapePath(currentFilename) .."\",\n")
