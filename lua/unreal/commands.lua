@@ -25,7 +25,11 @@ local logFilePath = vim.fn.stdpath("data") .. '/unrealnvim.log'
 
 local function logWithVerbosity(verbosity, message)
     if not vim.g.unrealnvim_debug then return end
-    if verbosity > vim.g.unrealnvim_loglevel then return end
+    local cfgVerbosity = kLogLevel_Log
+    if vim.g.unrealnvim_loglevel then
+        cfgVerbosity = vim.g.unrealnvim_loglevel
+    end
+    if verbosity > cfgVerbosity then return end
 
     local file = nil
     if Commands.logFile then
