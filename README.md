@@ -42,5 +42,5 @@ This should cause your LSP to start recognizing the Unreal types, including the 
 
 **Troubleshooting**
 - if you notice that some of the symbols in your project are not recognize/found, it is possible clangd's index cache is broken somehow. You can find clang's cache in the .cache directory that will sit next to your .uproject. It is full of .idx files, each corresponding to a source code file in your project. Close nvim, delete the .cache directory, reopen vim, navigate to one of your project's files. It should trigger clangd to rebuild the index.
-- Unreal.Nvim's log can be found in the nvim-data folder, but you need to enable logging first in nvim by setting `vim.g.unrealnvim_debug = true` and `vim.g.unrealnvim_loglevel = 4`
+- Unreal.Nvim's log can be found in the nvim-data folder, but you need to enable logging first in nvim by setting `vim.g.unrealnvim_debug = true`
 - clangd's LSP log can be found here: %localappdata%/nvim-data\lsp.log  If you are unsure whether clangd 'sees' some of your code, looking at this log helps
