@@ -435,7 +435,7 @@ function Stage_UbtGenCmd()
     local outputJsonPath = CurrentGenData.config.EngineDir .. "/compile_commands.json"
 
     local rspdir = CurrentGenData.prjDir .. "/Intermediate/clangRsp/" .. 
-    CurrentGenData.target.PlatformName .. "/".. 
+    CurrentGenData.target.PlatformName .. "/" .. 
     CurrentGenData.target.Configuration .. "/"
 
     -- all these replaces are slow, could be rewritten as a parser
@@ -473,8 +473,8 @@ function Stage_UbtGenCmd()
             local isEngineFile = IsEngineFile(currentFilename, CurrentGenData.config.EngineDir)
             local shouldSkipFile = isEngineFile and skipEngineFiles
 
-            local qflistentry = {filename = "", lnum = 0, col = 0, 
-                text =  currentFilename}
+            local qflistentry = {filename = "", lnum = 0, col = 0,
+                text = currentFilename}
             if not shouldSkipFile then
                 AppendToQF(qflistentry)
             end
@@ -483,8 +483,21 @@ function Stage_UbtGenCmd()
 
             -- content = content .. "matched:\n"
             i,j = line:find("%@")
+
             if i then
-                local _,endpos = line:find("\"", j)
+                -- The file name might have an optional \" around to shell escape the file name in the command.
+                local backslashValue = string.byte("\\", 1)
+                if string.byte(line, j+1) == backslashValue then
+                    j = j+2 -- \ and "
+                end
+
+                local _,endpos = line:find("\"", j+1)
+
+                -- same thing here
+                if string.byte(line, endpos-1) == backslashValue then
+                    endpos = endpos-1
+                end
+
                 local rsppath = line:sub(j+1, endpos-1)
                 if rsppath then
                     local newrsppath = rsppath .. ".clang.rsp"
@@ -666,7 +679,6 @@ function InitializeCurrentGenData()
         CurrentGenData.prjName .. ".uproject\""
 
     local desiredTargetIndex = PromptBuildTargetIndex()
-
     CurrentGenData.target = CurrentGenData.config.Targets[desiredTargetIndex]
 
     CurrentGenData.targetNameSuffix = ""
