@@ -3,8 +3,6 @@ if 1 ~= vim.fn.has "nvim-0.7.0" then
   return
 end
 
-vim.g.unrealnvim_debug=true
-
 if vim.g.loaded_unrealnvim == 1 then
   return
 end
