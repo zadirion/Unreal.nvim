@@ -103,8 +103,11 @@ if not vim.g.unrealnvim_loaded then
     CurrentGenData =
     {
         config = {},
-        target = nil,
-        prjName = nil, 
+        target = {
+          withEditor=true,
+          PlatformName="Win64",
+        },
+        prjName = nil,
         targetNameSuffix = nil,
         prjDir = nil,
         tasks = {},
@@ -148,7 +151,15 @@ function Commands:Inspect(objToInspect)
 
     if not self._inspect then
         local inspect_path = vim.fn.stdpath("data") .. "/site/pack/packer/start/inspect.lua/inspect.lua"
-        self._inspect = loadfile(inspect_path)(Commands._inspect)
+        local inspect=loadfile(inspect_path)
+        if inspect==nil then
+          self._inspect={
+            inspect=vim.inspect
+          }
+        else
+          self._inspect = inspect
+        end
+
         if  self._inspect then
             log("Inspect loaded.")
         else
@@ -254,7 +265,7 @@ function Commands._EnsureConfigFile(projectRootDir, projectName)
     local data = vim.fn.json_decode(content)
     Commands:Inspect(data)
     if data and (data.version ~= kCurrentVersion) then
-        PrintAndLogError("Your " .. configFilePath .. " format is incompatible. Please back up this file somewhere and then delete this one, you will be asked to create a new one") 
+        PrintAndLogError("Your " .. configFilePath .. " format is incompatible. Please back up this file somewhere and then delete this one, you will be asked to create a new one")
         data = nil
     end
 
@@ -382,38 +393,11 @@ local function IsEngineFile(path, start)
     return startIndex ~= nil
 end
 
-local function IsQuickfixWin(winid)
-    if not vim.api.nvim_win_is_valid(winid) then return false end
-    local bufnr = vim.api.nvim_win_get_buf(winid)
-    local buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
-
-    return buftype == 'quickfix'
-end
-
-local function GetQuickfixWinId()
-    local quickfix_winid = nil
-
-    for _, winid in ipairs(vim.api.nvim_list_wins()) do
-
-        if IsQuickfixWin(winid) then
-            quickfix_winid = winid
-            break
-        end
-    end
-    return quickfix_winid
-end
-
-Commands.QuickfixWinId = 0
-
 local function ScrollQF()
-    if not IsQuickfixWin(Commands.QuickfixWinId) then
-        Commands.QuickfixWinId = GetQuickfixWinId()
-    end
-
     local qf_list = vim.fn.getqflist()
     local last_line = #qf_list
     if last_line > 0 then
-        vim.api.nvim_win_set_cursor(Commands.QuickfixWinId, {last_line, 0})
+        vim.api.nvim_win_set_cursor(vim.fn.getqflist({winid=1}).winid, {last_line, 0})
     end
 end
 
@@ -434,8 +418,8 @@ function Stage_UbtGenCmd()
     PrintAndLogMessage("callback called!")
     local outputJsonPath = CurrentGenData.config.EngineDir .. "/compile_commands.json"
 
-    local rspdir = CurrentGenData.prjDir .. "/Intermediate/clangRsp/" .. 
-    CurrentGenData.target.PlatformName .. "/" .. 
+    local rspdir = CurrentGenData.prjDir .. "/Intermediate/clangRsp/" ..
+    CurrentGenData.target.PlatformName .. "/" ..
     CurrentGenData.target.Configuration .. "/"
 
     -- all these replaces are slow, could be rewritten as a parser
@@ -458,7 +442,7 @@ function Stage_UbtGenCmd()
 
     local qflistentry = {text = "Preparing files for parsing." }
     if not skipEngineFiles then
-        qflistentry.text = qflistentry.text .. " Engine source files included, process will take longer" 
+        qflistentry.text = qflistentry.text .. " Engine source files included, process will take longer"
     end
     AppendToQF(qflistentry)
 
@@ -586,6 +570,8 @@ function Stage_UbtGenCmd()
         CurrentGenData.prjName .. CurrentGenData.targetNameSuffix .. " " .. CurrentGenData.target.Configuration .. " " ..
         CurrentGenData.target.PlatformName .. " -headers"
 
+  
+
     vim.cmd("compiler msvc")
     vim.cmd("Dispatch " .. cmd)
 end
@@ -656,6 +642,38 @@ function Commands.GetProjectName()
     return CurrentGenData.prjName .. ".uproject"
 end
 
+function WindowsPathBuilder(CurrentGenData)
+    CurrentGenData.ubtPath = "\"" .. CurrentGenData.config.EngineDir .."/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe\""
+    CurrentGenData.ueBuildBat = "\"" .. CurrentGenData.config.EngineDir .."/Engine/Build/BatchFiles/Build.bat\""
+    CurrentGenData.projectPath = "\"" .. CurrentGenData.prjDir .. "/" ..
+        CurrentGenData.prjName .. ".uproject\""
+end
+
+function LinuxPathBuilder(CurrentGenData)
+    CurrentGenData.ubtPath =   CurrentGenData.config.EngineDir .."/Engine/Binaries/ThirdParty/DotNet/6.0.302/linux/dotnet "..
+        CurrentGenData.config.EngineDir.."/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
+
+    CurrentGenData.ueBuildBat =  CurrentGenData.config.EngineDir .."/Engine/Build/BatchFiles/Linux/Build.sh"
+    CurrentGenData.projectPath = CurrentGenData.prjDir .. "/" ..
+        CurrentGenData.prjName .. ".uproject"
+end
+
+function CurrentGenData._PathBuilder()
+    local desiredTargetIndex = PromptBuildTargetIndex()
+    CurrentGenData.target = CurrentGenData.config.Targets[desiredTargetIndex]
+  if  CurrentGenData.target.PlatformName == "Linux" then
+    LinuxPathBuilder(CurrentGenData)
+  else
+    WindowsPathBuilder(CurrentGenData)
+  end
+
+    CurrentGenData.targetNameSuffix = ""
+    if CurrentGenData.target.withEditor then
+        CurrentGenData.targetNameSuffix = "Editor"
+    end
+
+end
+
 function InitializeCurrentGenData()
     PrintAndLogMessage("initializing")
     local current_file_path = vim.api.nvim_buf_get_name(0)
@@ -672,19 +690,7 @@ function InitializeCurrentGenData()
         PrintAndLogMessage("no config file. aborting")
         return false
     end
-
-    CurrentGenData.ubtPath = "\"" .. CurrentGenData.config.EngineDir .."/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe\""
-    CurrentGenData.ueBuildBat = "\"" .. CurrentGenData.config.EngineDir .."/Engine/Build/BatchFiles/Build.bat\""
-    CurrentGenData.projectPath = "\"" .. CurrentGenData.prjDir .. "/" .. 
-        CurrentGenData.prjName .. ".uproject\""
-
-    local desiredTargetIndex = PromptBuildTargetIndex()
-    CurrentGenData.target = CurrentGenData.config.Targets[desiredTargetIndex]
-
-    CurrentGenData.targetNameSuffix = ""
-    if CurrentGenData.target.withEditor then
-        CurrentGenData.targetNameSuffix = "Editor"
-    end
+    CurrentGenData._PathBuilder()
 
     PrintAndLogMessage("Using engine at:"..CurrentGenData.config.EngineDir)
 
@@ -722,13 +728,13 @@ function Commands.BuildCoroutine()
     Commands.buildAutocmdid = vim.api.nvim_create_autocmd("ShellCmdPost",
         {
             pattern = "*",
-            callback = BuildComplete 
+            callback = BuildComplete
         })
 
-    local cmd = CurrentGenData.ueBuildBat .. " " .. CurrentGenData.prjName .. 
+    local cmd = CurrentGenData.ueBuildBat .. " " .. CurrentGenData.prjName ..
         CurrentGenData.targetNameSuffix .. " " ..
-        CurrentGenData.target.PlatformName  .. " " .. 
-        CurrentGenData.target.Configuration .. " " .. 
+        CurrentGenData.target.PlatformName  .. " " ..
+        CurrentGenData.target.Configuration .. " " ..
         CurrentGenData.projectPath .. " -waitmutex"
 
     vim.cmd("compiler msvc")
@@ -754,7 +760,7 @@ end
 function Commands.run(opts)
     CurrentGenData:ClearTasks()
     PrintAndLogMessage("Running uproject")
-    
+
     if not InitializeCurrentGenData() then
         return
     end
@@ -766,7 +772,7 @@ function Commands.run(opts)
     if CurrentGenData.target.withEditor then
         local editorSuffix = ""
         if CurrentGenData.target.Configuration ~= "Development" then
-            editorSuffix = "-" .. CurrentGenData.target.PlatformName .. "-" .. 
+            editorSuffix = "-" .. CurrentGenData.target.PlatformName .. "-" ..
             CurrentGenData.target.Configuration
         end
 
@@ -778,7 +784,7 @@ function Commands.run(opts)
     else
         local exeSuffix = ""
         if CurrentGenData.target.Configuration ~= "Development" then
-            exeSuffix = "-" .. CurrentGenData.target.PlatformName .. "-" .. 
+            exeSuffix = "-" .. CurrentGenData.target.PlatformName .. "-" ..
             CurrentGenData.target.Configuration
         end
 
@@ -965,7 +971,7 @@ function Commands._check_extension_in_directory(directory, extension)
         return nil
     end
 
-    handle = vim.loop.fs_scandir(directory) 
+    handle = vim.loop.fs_scandir(directory)
     local name, typ
 
     while handle do

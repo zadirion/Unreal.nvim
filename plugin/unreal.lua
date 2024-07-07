@@ -3,11 +3,12 @@ if 1 ~= vim.fn.has "nvim-0.7.0" then
   return
 end
 
+vim.g.unrealnvim_debug=true
+
 if vim.g.loaded_unrealnvim == 1 then
   return
 end
 vim.g.loaded_unrealnvim = 1
-
 
 vim.api.nvim_create_user_command("UnrealGen", function(opts)
     require("unreal.commands").generateCommands(opts)
