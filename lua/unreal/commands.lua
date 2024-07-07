@@ -570,8 +570,6 @@ function Stage_UbtGenCmd()
         CurrentGenData.prjName .. CurrentGenData.targetNameSuffix .. " " .. CurrentGenData.target.Configuration .. " " ..
         CurrentGenData.target.PlatformName .. " -headers"
 
-  
-
     vim.cmd("compiler msvc")
     vim.cmd("Dispatch " .. cmd)
 end
