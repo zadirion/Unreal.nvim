@@ -20,8 +20,21 @@ Install with packer:
   }
 ```
 After installing with packer, open one of your Unreal project's source files, and run `UnrealGenWithEngine`. This will go through all the engine source files and will generate a compatible clang compile-command for each, so that the lsp can properly parse them.
-It will take a long time to go through all of them, but you only need to run this command once, for your engine
-When you run it for the first time, it will open a configuration file in a new buffer and ask you to set the path to Unreal Engine. After doing that and saving the file, run `:UnrealGenWithEngine` again
+It will take a long time to go through all of them, but you only need to run this command once, for your engine.
+After running it for the first time, it will open a configuration file in a new buffer. In this buffer set the value of the `"EngineDir"` key to the path to Unreal Engine on your system. For example,
+
+```jsonc
+// UnrealNvim.json
+{
+  "version": "0.0.2",
+  "EngineDir": "C:\\Program Files\\Epic Games\\UE_5.4\\"
+  "Targets": [
+    // ...
+  ]
+}
+```
+
+After doing that and saving the file, run `:UnrealGenWithEngine` again.
 
 From here onwards, you can use `:UnrealGen` to generate the compile commands for just your project files. Feel free to do so every time you feel like the lsp is not picking up your symbols, such as when you added new source code files to your project or if you updated to latest changelist/commig in your version control. 
 `:UnrealGen` will always ask you which target to generate compile_commands.json for. Just input the number corresponding to the desired configuration, and it will generate the json right next to the uproject
