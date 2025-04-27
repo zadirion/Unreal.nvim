@@ -175,29 +175,30 @@ end
 
 function GetConfigPlatform()
     local os
-    if OS == "Windows" then
-        os = "Win"
-    elseif OS == "OSX" then
-        os = "Mac"
-    elseif OS == "Linux" then
-        os = "Linux"
+    if OS == 'Windows' then
+        os = 'Win'
+    elseif OS == 'OSX' then
+        os = 'Mac'
+    elseif OS == 'Linux' then
+        os = 'Linux'
     end
 
     local arch
-    if ARCH == "x86" or ARCH == "x64" then
-        arch = "64"
-    elseif ARCH == "arm" or ARCH == "arm64" then
-        arch = "Arm64"
+    if ARCH == 'x86' or ARCH == 'x64' then
+        arch = '64'
+    elseif ARCH == 'arm' or ARCH == 'arm64' then
+        arch = 'Arm64'
     end
 
     return os .. arch
 end
 
-function Commands._CreateConfigFile(configFilePath, projectName, platform)
+function Commands._CreateConfigFile(configFilePath, projectName)
+    local platform = GetConfigPlatform()
     local configContents = [[
 {
     "version" : "0.0.2",
-    "_comment": "dont forget to escape backslashes in EnginePath",
+    "_comment": "do not forget to escape backslashes in EnginePath",
     "EngineDir": "",
     "Targets":  [
 
@@ -265,8 +266,7 @@ function Commands._EnsureConfigFile(projectRootDir, projectName)
 
 
     if (not configFile) then
-        local platform = GetConfigPlatform()
-        Commands._CreateConfigFile(configFilePath, projectName, platform)
+        Commands._CreateConfigFile(configFilePath, projectName)
         PrintAndLogMessage("created config file")
         return nil
     end
@@ -393,11 +393,9 @@ end
 
 function EnsureDirPath(path)
     PrintAndLogMessage("Ensuring path exists: " .. path)
-    -- os.execute("mkdir -p " .. path)
-    local handle = io.popen("cmd.exe /c mkdir \"" .. path .. "\"")
-    handle:flush()
-    local result = handle:read("*a")
-    handle:close()
+    if vim.fn.isdirectory(path) == 0 then
+        vim.fn.mkdir(path, "p")
+    end
 end
 
 local function IsEngineFile(path, start)
@@ -468,9 +466,6 @@ function Stage_UbtGenCmd()
     -- replace bad compiler
     local file_path = outputJsonPath
 
-    local old_text = "Llvm\\\\x64\\\\bin\\\\clang%-cl%.exe"
-    local new_text = "Llvm/x64/bin/clang++.exe"
-
     local contentLines = {}
     PrintAndLogMessage("processing compile_commands.json and writing response files")
     PrintAndLogMessage(file_path)
@@ -507,7 +502,11 @@ function Stage_UbtGenCmd()
                 AppendToQF(qflistentry)
             end
 
-            line = line:gsub(old_text, new_text)
+            if OS == 'Windows' then
+                local old_text = "Llvm\\\\x64\\\\bin\\\\clang%-cl%.exe"
+                local new_text = "Llvm/x64/bin/clang++.exe"
+                line = line:gsub(old_text, new_text)
+            end
 
             -- content = content .. "matched:\n"
             i, j = line:find("%@")
@@ -539,7 +538,11 @@ function Stage_UbtGenCmd()
                     end
                     coroutine.yield()
 
-                    table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" .. newrsppath .. "\\\"\",\n")
+                    if OS == 'Windows' then
+                        table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" .. newrsppath .. "\\\"\",\n")
+                    else
+                        table.insert(contentLines, "\t\t\"command\": \"clang++ @\\\"" .. newrsppath .. "\\\"\",\n")
+                    end
                 end
             else
                 -- it's not an rsp command, the flags will be clang compatible
@@ -577,8 +580,15 @@ function Stage_UbtGenCmd()
                 end
                 coroutine.yield()
 
-                table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" .. EscapePath(rspfilepath) .. "\\\""
-                    .. " " .. EscapePath(currentFilename) .. "\",\n")
+                if OS == 'Windows' then
+                    table.insert(contentLines,
+                        "\t\t\"command\": \"clang++.exe @\\\"" .. EscapePath(rspfilepath) .. "\\\""
+                        .. " " .. EscapePath(currentFilename) .. "\",\n")
+                else
+                    table.insert(contentLines,
+                        "\t\t\"command\": \"clang++ @\\\"" .. EscapePath(rspfilepath) .. "\\\""
+                        .. " " .. EscapePath(currentFilename) .. "\",\n")
+                end
             end
         else
             local fbegin, fend = line:find("\"file\": ")
@@ -703,9 +713,22 @@ function InitializeCurrentGenData()
         return false
     end
 
-    CurrentGenData.ubtPath = "\"" ..
-        CurrentGenData.config.EngineDir .. "/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe\""
-    CurrentGenData.ueBuildBat = "\"" .. CurrentGenData.config.EngineDir .. "/Engine/Build/BatchFiles/Build.bat\""
+    if OS == 'Windows' then
+        CurrentGenData.ubtPath = "\"" ..
+            CurrentGenData.config.EngineDir .. "/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe\""
+        CurrentGenData.ueBuildBat = "\"" .. CurrentGenData.config.EngineDir .. "/Engine/Build/BatchFiles/Build.bat\""
+    else
+        CurrentGenData.ubtPath = "\"" ..
+            CurrentGenData.config.EngineDir .. "/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool\""
+
+        if OS == 'Linux' then
+            CurrentGenData.ueBuildBat = "\"" .. CurrentGenData.config.EngineDir .. "/Engine/Build/BatchFiles/Linux/Setup.sh\""
+        end
+
+        if OS == 'OSX' then
+            CurrentGenData.ueBuildBat = "\"" .. CurrentGenData.config.EngineDir .. "/Engine/Build/BatchFiles/Mac/Setup.sh\""
+        end
+    end
     CurrentGenData.projectPath = "\"" .. CurrentGenData.prjDir .. "/" ..
         CurrentGenData.prjName .. ".uproject\""
 
