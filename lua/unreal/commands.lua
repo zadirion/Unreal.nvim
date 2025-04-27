@@ -178,9 +178,9 @@ function GetConfigPlatform()
     if OS == 'Windows' then
         os = 'Win'
     elseif OS == 'OSX' then
-        os = 'Mac'
+        return 'Mac'
     elseif OS == 'Linux' then
-        os = 'Linux'
+        return 'Linux'
     end
 
     local arch
@@ -624,7 +624,9 @@ function Stage_UbtGenCmd()
         CurrentGenData.prjName .. CurrentGenData.targetNameSuffix .. " " .. CurrentGenData.target.Configuration .. " " ..
         CurrentGenData.target.PlatformName .. " -headers"
 
-    vim.cmd("compiler msvc")
+    if OS == 'Windows' then
+        vim.cmd("compiler msvc")
+    end
     vim.cmd("Dispatch " .. cmd)
 end
 
@@ -722,11 +724,13 @@ function InitializeCurrentGenData()
             CurrentGenData.config.EngineDir .. "/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool\""
 
         if OS == 'Linux' then
-            CurrentGenData.ueBuildBat = "\"" .. CurrentGenData.config.EngineDir .. "/Engine/Build/BatchFiles/Linux/Setup.sh\""
+            CurrentGenData.ueBuildBat = "\"" ..
+                CurrentGenData.config.EngineDir .. "/Engine/Build/BatchFiles/Linux/Setup.sh\""
         end
 
         if OS == 'OSX' then
-            CurrentGenData.ueBuildBat = "\"" .. CurrentGenData.config.EngineDir .. "/Engine/Build/BatchFiles/Mac/Setup.sh\""
+            CurrentGenData.ueBuildBat = "\"" ..
+                CurrentGenData.config.EngineDir .. "/Engine/Build/BatchFiles/Mac/Setup.sh\""
         end
     end
     CurrentGenData.projectPath = "\"" .. CurrentGenData.prjDir .. "/" ..
@@ -785,7 +789,9 @@ function Commands.BuildCoroutine()
         CurrentGenData.target.Configuration .. " " ..
         CurrentGenData.projectPath .. " -waitmutex"
 
-    vim.cmd("compiler msvc")
+    if OS == 'Windows' then
+        vim.cmd("compiler msvc")
+    end
     vim.cmd("Dispatch " .. cmd)
 end
 
@@ -841,7 +847,9 @@ function Commands.run(opts)
     end
 
     PrintAndLogMessage(cmd)
-    vim.cmd("compiler msvc")
+    if OS == 'Windows' then
+        vim.cmd("compiler msvc")
+    end
     vim.cmd("Dispatch " .. cmd)
     Commands.EndTask("run")
     Commands.EndTask("final")
@@ -881,8 +889,8 @@ function Commands.generateCommands(opts)
         })
 
     PrintAndLogMessage("listening to ShellCmdPost")
-    --vim.cmd("compiler msvc")
-    PrintAndLogMessage("compiler set to msvc")
+    -- vim.cmd("compiler msvc")
+    -- PrintAndLogMessage("compiler set to msvc")
 
     Commands.taskCoroutine = coroutine.create(Commands.generateCommandsCoroutine)
     Commands.EnsureUpdateStarted()
@@ -1031,7 +1039,7 @@ function Commands._check_extension_in_directory(directory, extension)
 end
 
 function Commands._find_file_with_extension(filepath, extension)
-    local current_dir = vim.fn.fnamemodify(filepath, ":h")
+    local current_dir = vim.fn.fnamemodify(filepath, ":p:h")
     local parent_dir = vim.fn.fnamemodify(current_dir, ":h")
     -- Check if the file exists in the current directory
     local filename = vim.fn.fnamemodify(filepath, ":t")
