@@ -1,3 +1,5 @@
+local OS = jit.os
+
 local kConfigFileName = "UnrealNvim.json"
 local kCurrentVersion = "0.0.2"
 
@@ -6,9 +8,6 @@ local kLogLevel_Warning = 2
 local kLogLevel_Log = 3
 local kLogLevel_Verbose = 4
 local kLogLevel_VeryVerbose = 5
-
-local OS = jit.os
-local ARCH = jit.arch
 
 local TaskState =
 {
@@ -173,28 +172,16 @@ function SplitString(str)
     return lines
 end
 
-function GetConfigPlatform()
-    local os
-    if OS == 'Windows' then
-        os = 'Win'
-    elseif OS == 'OSX' then
-        return 'Mac'
-    elseif OS == 'Linux' then
-        return 'Linux'
-    end
-
-    local arch
-    if ARCH == 'x86' or ARCH == 'x64' then
-        arch = '64'
-    elseif ARCH == 'arm' or ARCH == 'arm64' then
-        arch = 'Arm64'
-    end
-
-    return os .. arch
-end
-
 function Commands._CreateConfigFile(configFilePath, projectName)
-    local platform = GetConfigPlatform()
+    local platform
+    if OS == 'Windows' then
+        platform = 'Win64'
+    elseif OS == 'OSX' then
+        platform = 'Mac'
+    elseif OS == 'Linux' then
+        platform = 'Linux'
+    end
+
     local configContents = [[
 {
     "version" : "0.0.2",
