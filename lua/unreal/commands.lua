@@ -541,7 +541,7 @@ function Stage_UbtGenCmd()
                     if OS == 'Windows' then
                         table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" .. newrsppath .. "\\\"\",\n")
                     else
-                        table.insert(contentLines, "\t\t\"command\": \"clang++ @\\\"" .. newrsppath .. "\\\"\",\n")
+                        table.insert(contentLines, "\t\t\"command\": \"clang++ \\\"" .. newrsppath .. "\\\"\",\n")
                     end
                 end
             else
@@ -586,7 +586,7 @@ function Stage_UbtGenCmd()
                         .. " " .. EscapePath(currentFilename) .. "\",\n")
                 else
                     table.insert(contentLines,
-                        "\t\t\"command\": \"clang++ @\\\"" .. EscapePath(rspfilepath) .. "\\\""
+                        "\t\t\"command\": \"clang++ \\\"" .. EscapePath(rspfilepath) .. "\\\""
                         .. " " .. EscapePath(currentFilename) .. "\",\n")
                 end
             end
