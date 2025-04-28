@@ -173,14 +173,12 @@ function SplitString(str)
 end
 
 function Commands._CreateConfigFile(configFilePath, projectName)
-    local platform
-    if OS == 'Windows' then
-        platform = 'Win64'
-    elseif OS == 'OSX' then
-        platform = 'Mac'
-    elseif OS == 'Linux' then
-        platform = 'Linux'
-    end
+    local platforms = {
+        Windows = 'Win64',
+        OSX = 'Mac',
+        Linux = 'Linux'
+    }
+    local platform = platforms[OS]
 
     local configContents = [[
 {
