@@ -22,6 +22,12 @@ local logFilePath = vim.fn.stdpath("data") .. "/unrealnvim.log"
 
 -- platform detection
 local OS = jit.os
+local platforms = {
+    Windows = "Win64",
+    OSX = "Mac",
+    Linux = "Linux",
+}
+local platform = platforms[OS]
 local clangExecutable = OS == "Windows" and "clang++.exe" or "clang++"
 
 local function logWithVerbosity(verbosity, message)
@@ -178,12 +184,6 @@ function SplitString(str)
 end
 
 function Commands._CreateConfigFile(configFilePath, projectName)
-    local platforms = {
-        Windows = "Win64",
-        OSX = "Mac",
-        Linux = "Linux",
-    }
-    local platform = platforms[OS]
     local configContents = [[
 {
     "version" : "0.0.2",
@@ -707,7 +707,7 @@ function Commands.GetProjectName()
     return CurrentGenData.prjName .. ".uproject"
 end
 
-function InitializeCurrentGenData()
+local function InitializeCurrentGenData()
     PrintAndLogMessage("initializing")
     local current_file_path = vim.api.nvim_buf_get_name(0)
     CurrentGenData.prjName, CurrentGenData.prjDir = Commands._GetDefaultProjectNameAndDir(current_file_path)
