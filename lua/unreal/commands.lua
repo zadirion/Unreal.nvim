@@ -1,5 +1,3 @@
-local OS = jit.os
-
 local kConfigFileName = "UnrealNvim.json"
 local kCurrentVersion = "0.0.2"
 
@@ -21,6 +19,15 @@ if not vim then
 end
 
 local logFilePath = vim.fn.stdpath("data") .. "/unrealnvim.log"
+
+-- platform detection
+local OS = jit.os
+local platforms = {
+    Windows = "Win64",
+    OSX = "Mac",
+    Linux = "Linux",
+}
+local platform = platforms[OS]
 
 local function logWithVerbosity(verbosity, message)
     if not vim.g.unrealnvim_debug then
@@ -176,13 +183,6 @@ function SplitString(str)
 end
 
 function Commands._CreateConfigFile(configFilePath, projectName)
-    local platforms = {
-        Windows = "Win64",
-        OSX = "Mac",
-        Linux = "Linux",
-    }
-    local platform = platforms[OS]
-
     local configContents = [[
 {
     "version" : "0.0.2",
@@ -267,8 +267,9 @@ function Commands._EnsureConfigFile(projectRootDir, projectName)
     if data and (data.version ~= kCurrentVersion) then
         PrintAndLogError(
             "Your "
-                .. configFilePath
-                .. " format is incompatible. Please back up this file somewhere and then delete this one, you will be asked to create a new one"
+            .. configFilePath
+            ..
+            " format is incompatible. Please back up this file somewhere and then delete this one, you will be asked to create a new one"
         )
         data = nil
     end
@@ -332,7 +333,7 @@ end
 
 function ExtractRSP(rsppath)
     local extraFlags =
-        "-std=c++20 -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -ferror-limit=0 -Wno-inconsistent-missing-override"
+    "-std=c++20 -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -ferror-limit=0 -Wno-inconsistent-missing-override"
     local extraIncludes = {
         "Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h",
         "Engine/Source/Runtime/Core/Public/Misc/EnumRange.h",
@@ -589,21 +590,21 @@ function Stage_UbtGenCmd()
                     table.insert(
                         contentLines,
                         '\t\t"command": "clang++.exe @\\"'
-                            .. EscapePath(rspfilepath)
-                            .. '\\"'
-                            .. " "
-                            .. EscapePath(currentFilename)
-                            .. '",\n'
+                        .. EscapePath(rspfilepath)
+                        .. '\\"'
+                        .. " "
+                        .. EscapePath(currentFilename)
+                        .. '",\n'
                     )
                 else
                     table.insert(
                         contentLines,
                         '\t\t"command": "clang++ @\\"'
-                            .. EscapePath(rspfilepath)
-                            .. '\\"'
-                            .. " "
-                            .. EscapePath(currentFilename)
-                            .. '",\n'
+                        .. EscapePath(rspfilepath)
+                        .. '\\"'
+                        .. " "
+                        .. EscapePath(currentFilename)
+                        .. '",\n'
                     )
                 end
             end
@@ -741,28 +742,16 @@ function InitializeCurrentGenData()
         return false
     end
 
-    if OS == "Windows" then
-        CurrentGenData.ubtPath = '"'
-            .. CurrentGenData.config.EngineDir
-            .. '/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe"'
-        CurrentGenData.ueBuildBat = '"' .. CurrentGenData.config.EngineDir .. '/Engine/Build/BatchFiles/Build.bat"'
-    else
-        CurrentGenData.ubtPath = '"'
-            .. CurrentGenData.config.EngineDir
-            .. '/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool"'
+    local engineDir = CurrentGenData.config.EngineDir
 
-        if OS == "Linux" then
-            CurrentGenData.ueBuildBat = '"'
-                .. CurrentGenData.config.EngineDir
-                .. '/Engine/Build/BatchFiles/Linux/Setup.sh"'
-        end
+    local ubtExecutable = "UnrealBuildTool" .. ((OS == "Windows") and ".exe" or "")
+    local ubtFullPath = engineDir .. "/Engine/Binaries/DotNET/UnrealBuildTool/" .. ubtExecutable
+    CurrentGenData.ubtPath = '"' .. ubtFullPath .. '"'
 
-        if OS == "OSX" then
-            CurrentGenData.ueBuildBat = '"'
-                .. CurrentGenData.config.EngineDir
-                .. '/Engine/Build/BatchFiles/Mac/Setup.sh"'
-        end
-    end
+    local buildScript = (OS == "Windows") and "Build.bat" or (platform .. "/Setup.sh")
+    local buildScriptFullPath = engineDir .. "/Engine/Build/BatchFiles/" .. buildScript
+    CurrentGenData.ueBuildBat = '"' .. buildScriptFullPath .. '"'
+
     CurrentGenData.projectPath = '"' .. CurrentGenData.prjDir .. "/" .. CurrentGenData.prjName .. '.uproject"'
 
     local desiredTargetIndex = PromptBuildTargetIndex()
@@ -773,7 +762,7 @@ function InitializeCurrentGenData()
         CurrentGenData.targetNameSuffix = "Editor"
     end
 
-    PrintAndLogMessage("Using engine at:" .. CurrentGenData.config.EngineDir)
+    PrintAndLogMessage("Using engine at:" .. engineDir)
 
     return true
 end
