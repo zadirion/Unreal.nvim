@@ -544,11 +544,9 @@ function Stage_UbtGenCmd()
                     end
                     coroutine.yield()
 
-                    if OS == "Windows" then
-                        table.insert(contentLines, '\t\t"command": "clang++.exe @\\"' .. newrsppath .. '\\"",\n')
-                    else
-                        table.insert(contentLines, '\t\t"command": "clang++ @\\"' .. newrsppath .. '\\"",\n')
-                    end
+                    local executable = OS == "Windows" and "clang++.exe" or "clang++"
+                    local commandStr = '\t\t"command": "' .. executable .. ' @\\"' .. newrsppath .. '\\"",\n'
+                    table.insert(contentLines, commandStr)
                 end
             else
                 -- it's not an rsp command, the flags will be clang compatible
@@ -586,27 +584,11 @@ function Stage_UbtGenCmd()
                 end
                 coroutine.yield()
 
-                if OS == "Windows" then
-                    table.insert(
-                        contentLines,
-                        '\t\t"command": "clang++.exe @\\"'
-                        .. EscapePath(rspfilepath)
-                        .. '\\"'
-                        .. " "
-                        .. EscapePath(currentFilename)
-                        .. '",\n'
-                    )
-                else
-                    table.insert(
-                        contentLines,
-                        '\t\t"command": "clang++ @\\"'
-                        .. EscapePath(rspfilepath)
-                        .. '\\"'
-                        .. " "
-                        .. EscapePath(currentFilename)
-                        .. '",\n'
-                    )
-                end
+                local executable = OS == "Windows" and "clang++.exe" or "clang++"
+                local commandStr = '\t\t"command": "' .. executable .. ' @\\"'
+                    .. EscapePath(rspfilepath) .. '\\" '
+                    .. EscapePath(currentFilename) .. '",\n'
+                table.insert(contentLines, commandStr)
             end
         else
             local fbegin, fend = line:find('"file": ')
