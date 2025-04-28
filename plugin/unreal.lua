@@ -33,6 +33,6 @@ vim.api.nvim_create_user_command("UnrealCD", function(opts)
     require("unreal.commands").SetUnrealCD(opts)
 end, {})
 
-function setup(args)
-    print("setting up plugin")
+function Setup(_)
+    -- print("setting up plugin")
 end

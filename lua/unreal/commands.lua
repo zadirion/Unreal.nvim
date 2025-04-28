@@ -412,8 +412,7 @@ local function IsQuickfixWin(winid)
         return false
     end
     local bufnr = vim.api.nvim_win_get_buf(winid)
-    local buftype = vim.api.nvim_buf_get_option(bufnr, "buftype")
-
+    local buftype = vim.bo[bufnr].buftype
     return buftype == "quickfix"
 end
 
@@ -602,11 +601,6 @@ function Stage_UbtGenCmd()
     end
 
     local file = io.open(CurrentCompileCommandsTargetFilePath, "w")
-    if file == nil then
-        vim.notify("File couldn't be opened: " .. CurrentCompileCommandsTargetFilePath, vim.log.levels.ERROR)
-        return
-    end
-
     file:write(table.concat(contentLines))
     file:flush()
     file:close()
@@ -1037,9 +1031,9 @@ function Commands.generateCommandsCoroutine()
     PrintAndLogMessage("Dispatched")
 end
 
-function Commands.SetUnrealCD()
+function Commands.SetUnrealCD(_)
     local current_file_path = vim.api.nvim_buf_get_name(0)
-    local prjName, prjDir = Commands._GetDefaultProjectNameAndDir(current_file_path)
+    local _, prjDir = Commands._GetDefaultProjectNameAndDir(current_file_path)
     if prjDir then
         vim.cmd("cd " .. prjDir)
     else
@@ -1055,16 +1049,16 @@ function Commands._check_extension_in_directory(directory, extension)
         return nil
     end
 
-    handle = vim.loop.fs_scandir(directory)
-    local name, typ
+    local handle = vim.loop.fs_scandir(directory)
+    local name, _
 
     while handle do
-        name, typ = vim.loop.fs_scandir_next(handle)
+        name, _ = vim.loop.fs_scandir_next(handle)
         if not name then
             break
         end
         local ext = vim.fn.fnamemodify(name, ":e")
-        if ext == "uproject" then
+        if ext == extension then
             return directory .. "/" .. name
         end
     end
