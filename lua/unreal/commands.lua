@@ -22,12 +22,7 @@ local logFilePath = vim.fn.stdpath("data") .. "/unrealnvim.log"
 
 -- platform detection
 local OS = jit.os
-local platforms = {
-    Windows = "Win64",
-    OSX = "Mac",
-    Linux = "Linux",
-}
-local platform = platforms[OS]
+local clangExecutable = OS == "Windows" and "clang++.exe" or "clang++"
 
 local function logWithVerbosity(verbosity, message)
     if not vim.g.unrealnvim_debug then
@@ -183,6 +178,12 @@ function SplitString(str)
 end
 
 function Commands._CreateConfigFile(configFilePath, projectName)
+    local platforms = {
+        Windows = "Win64",
+        OSX = "Mac",
+        Linux = "Linux",
+    }
+    local platform = platforms[OS]
     local configContents = [[
 {
     "version" : "0.0.2",
@@ -544,8 +545,7 @@ function Stage_UbtGenCmd()
                     end
                     coroutine.yield()
 
-                    local executable = OS == "Windows" and "clang++.exe" or "clang++"
-                    local commandStr = '\t\t"command": "' .. executable .. ' @\\"' .. newrsppath .. '\\"",\n'
+                    local commandStr = '\t\t"command": "' .. clangExecutable .. ' @\\"' .. newrsppath .. '\\"",\n'
                     table.insert(contentLines, commandStr)
                 end
             else
@@ -584,8 +584,8 @@ function Stage_UbtGenCmd()
                 end
                 coroutine.yield()
 
-                local executable = OS == "Windows" and "clang++.exe" or "clang++"
-                local commandStr = '\t\t"command": "' .. executable .. ' @\\"'
+                local clangExecutable = OS == "Windows" and "clang++.exe" or "clang++"
+                local commandStr = '\t\t"command": "' .. clangExecutable .. ' @\\"'
                     .. EscapePath(rspfilepath) .. '\\" '
                     .. EscapePath(currentFilename) .. '",\n'
                 table.insert(contentLines, commandStr)
@@ -602,6 +602,11 @@ function Stage_UbtGenCmd()
     end
 
     local file = io.open(CurrentCompileCommandsTargetFilePath, "w")
+    if file == nil then
+        vim.notify("File couldn't be opened: " .. CurrentCompileCommandsTargetFilePath, vim.log.levels.ERROR)
+        return
+    end
+
     file:write(table.concat(contentLines))
     file:flush()
     file:close()
@@ -919,7 +924,7 @@ end
 function Commands.safeUpdateLoop()
     local success, errmsg = pcall(Commands.updateLoop)
     if not success then
-        vim.api.nvim_err_writeln("Error in update:" .. errmsg)
+        vim.notify("Error in update: " .. errmsg, vim.log.levels.ERROR)
     end
 end
 
@@ -960,7 +965,7 @@ function Commands.safeLogicUpdate()
     end)
 
     if not success then
-        vim.api.nvim_err_writeln("Error in update:" .. errmsg)
+        vim.notify("Error in update: " .. errmsg, vim.log.levels.ERROR)
     end
     vim.defer_fn(Commands.safeLogicUpdate, 1)
 end
