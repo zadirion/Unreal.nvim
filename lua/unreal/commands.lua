@@ -1,18 +1,14 @@
 
-local kConfigFileName = "UnrealNvim.json"
-local kCurrentVersion = "0.0.2"
+-- Configuration constants
+local kConfigFileName = "UnrealNvim.json"  -- Name of the configuration file
+local kCurrentVersion = "0.0.2"            -- Current version of the configuration format
 
-local kLogLevel_Error = 1
-local kLogLevel_Warning = 2
-local kLogLevel_Log = 3
-local kLogLevel_Verbose = 4
-local kLogLevel_VeryVerbose = 5
-
+-- Task state enumeration for tracking build/process states
 local TaskState =
 {
-    scheduled = "scheduled",
-    inprogress = "inprogress",
-    completed = "completed"
+    scheduled = "scheduled",    -- Task is queued but not yet started
+    inprogress = "inprogress",  -- Task is currently running
+    completed = "completed"     -- Task has finished successfully
 }
 
 -- fix false diagnostic about vim
@@ -20,129 +16,79 @@ if not vim then
     vim = {}
 end
 
+-- Import utility modules
+local file_util = require("unreal.file_util")
+local log_util = require("unreal.log_util")
 
-local logFilePath = vim.fn.stdpath("data") .. '/unrealnvim.log'
 
-local function logWithVerbosity(verbosity, message)
-    if not vim.g.unrealnvim_debug then return end
-    local cfgVerbosity = kLogLevel_Log
-    if vim.g.unrealnvim_loglevel then
-        cfgVerbosity = vim.g.unrealnvim_loglevel
-    end
-    if verbosity > cfgVerbosity then return end
 
-    local file = nil
-    if Commands.logFile then
-        file = Commands.logFile
-    else
-        file = io.open(logFilePath, "a")
-    end
-
-    if file then
-        local time = os.date('%m/%d/%y %H:%M:%S');
-        file:write("["..time .. "]["..verbosity.."]: " .. message .. '\n')
-    end
-end
-
-local function log(message)
-    if not message then
-        logWithVerbosity(kLogLevel_Error, "message was nill")
-        return
-    end
-
-    logWithVerbosity(kLogLevel_Log, message)
-end
-
-local function logError(message)
-    logWithVerbosity(kLogLevel_Error, message)
-end
-
-local function PrintAndLogMessage(a,b)
-    if a and b then
-        log(tostring(a)..tostring(b))
-    elseif a then
-        log(tostring(a))
-    end
-end
-
-local function PrintAndLogError(a,b)
-    if a and b then
-        local msg = "Error: "..tostring(a)..tostring(b)
-        print(msg)
-        log(msg)
-    elseif a then
-        local msg = "Error: ".. tostring(a)
-        print(msg)
-        log(msg)
-    end
-end
-
-local function MakeUnixPath(win_path)
-    if not win_path then
-        logError("MakeUnixPath received a nil argument")
-        return;
-    end
-    -- Convert backslashes to forward slashes
-    local unix_path = win_path:gsub("\\", "/")
-
-    -- Remove duplicate slashes
-    unix_path = unix_path:gsub("//+", "/")
-
-    return unix_path
-end
-
+-- Creates a function that calls the given function with the specified data
+-- Used for creating callback functions with bound data
+-- @param func: The function to bind
+-- @param data: The data to pass to the function
+-- @return: A new function that calls func(data)
 local function FuncBind(func, data)
     return function()
         func(data)
     end
 end
 
+-- Initialize global state if not already loaded
 if not vim.g.unrealnvim_loaded then
     Commands = {}
 
+    -- Global data structure for tracking current generation/build state
     CurrentGenData =
     {
-        config = {},
-        target = nil,
-        prjName = nil, 
-        targetNameSuffix = nil,
-        prjDir = nil,
-        tasks = {},
-        currentTask = "",
-        ubtPath = "",
-        ueBuildBat = "",
-        projectPath = "",
-        logFile = nil
+        config = {},              -- Configuration data from UnrealNvim.json
+        target = nil,             -- Currently selected build target
+        prjName = nil,            -- Project name
+        targetNameSuffix = nil,   -- Suffix for target name (e.g., "Editor")
+        prjDir = nil,             -- Project directory path
+        tasks = {},               -- Dictionary of task states
+        currentTask = "",         -- Currently running task name
+        ubtPath = "",             -- Path to UnrealBuildTool.exe
+        ueBuildBat = "",          -- Path to UE build batch file
+        projectPath = "",         -- Full path to .uproject file
+        logFile = nil             -- Log file handle
     }
-    -- clear the log
-    CurrentGenData.logFile = io.open(logFilePath, "w")
+    -- Initialize and clear the log file
+    CurrentGenData.logFile = io.open(vim.fn.stdpath("data") .. '/unrealnvim.log', "w")
 
     if CurrentGenData.logFile then
         CurrentGenData.logFile:write("")
         CurrentGenData.logFile:close()
 
-        CurrentGenData.logFile = io.open(logFilePath, "a")
+        CurrentGenData.logFile = io.open(vim.fn.stdpath("data") .. '/unrealnvim.log', "a")
     end
     vim.g.unrealnvim_loaded = true
 end
 
-Commands.LogLevel_Error = kLogLevel_Error
-Commands.LogLevel_Warning = kLogLevel_Warning
-Commands.LogLevel_Log = kLogLevel_Log
-Commands.LogLevel_Verbose = kLogLevel_Verbose
-Commands.LogLevel_VeryVerbose = kLogLevel_VeryVerbose
+-- Expose log levels as constants on the Commands object
+Commands.LogLevel_Error = log_util.kLogLevel_Error
+Commands.LogLevel_Warning = log_util.kLogLevel_Warning
+Commands.LogLevel_Log = log_util.kLogLevel_Log
+Commands.LogLevel_Verbose = log_util.kLogLevel_Verbose
+Commands.LogLevel_VeryVerbose = log_util.kLogLevel_VeryVerbose
 
+-- Logs a message using the error logging function
+-- @param msg: The message to log
 function Commands.Log(msg)
-    PrintAndLogError(msg)
+    log_util.PrintAndLogError(msg)
 end
 
+-- Callback function for status updates (can be overridden)
 Commands.onStatusUpdate = function()
 end
 
+-- Inspects an object for debugging purposes using the inspect.lua library
+-- Only works when debugging is enabled
+-- @param objToInspect: The object to inspect
+-- @return: String representation of the object
 function Commands:Inspect(objToInspect)
     if not vim.g.unrealnvim_debug then return end
     if not objToInspect then
-        log(objToInspect)
+        log_util.log(objToInspect)
         return
     end
 
@@ -150,28 +96,25 @@ function Commands:Inspect(objToInspect)
         local inspect_path = vim.fn.stdpath("data") .. "/site/pack/packer/start/inspect.lua/inspect.lua"
         self._inspect = loadfile(inspect_path)(Commands._inspect)
         if  self._inspect then
-            log("Inspect loaded.")
+            log_util.log("Inspect loaded.")
         else
-            logError("Inspect failed to load from path" .. inspect_path)
+            log_util.logError("Inspect failed to load from path" .. inspect_path)
         end
         if self._inspect.inspect then
-            log("inspect method exists")
+            log_util.log("inspect method exists")
         else
-            logError("inspect method doesn't exist")
+            log_util.logError("inspect method doesn't exist")
         end
     end
     return self._inspect.inspect(objToInspect)
 end
 
-function SplitString(str)
-    -- Split a string into lines
-    local lines = {}
-    for line in string.gmatch(str, "[^\r\n]+") do
-        table.insert(lines, line)
-    end
-    return lines
-end
 
+
+-- Creates a new configuration file with default Unreal Engine build targets
+-- Opens the file in a new buffer for user editing
+-- @param configFilePath: Path where to create the config file
+-- @param projectName: Name of the Unreal project
 function Commands._CreateConfigFile(configFilePath, projectName)
     local configContents = [[
 {
@@ -228,15 +171,20 @@ function Commands._CreateConfigFile(configFilePath, projectName)
     -- local file = io.open(configFilePath, "w")
     -- file:write(configContents)
     -- file:close()
-    PrintAndLogMessage("Please populate the configuration for the Unreal project, especially EnginePath, the path to the Unreal Engine")
+    log_util.PrintAndLogMessage("Please populate the configuration for the Unreal project, especially EnginePath, the path to the Unreal Engine")
     -- local buf = vim.api.nvim_create_buf(false, true)
     vim.cmd('new ' .. configFilePath)
     vim.cmd('setlocal buftype=')
     -- vim.api.nvim_buf_set_name(0, configFilePath)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, SplitString(configContents))
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, file_util.SplitString(configContents))
     -- vim.api.nvim_open_win(buf, true, {relative="win", height=20, width=80, row=1, col=0})
 end
 
+-- Ensures a configuration file exists and is valid
+-- Creates a new config file if it doesn't exist, validates version if it does
+-- @param projectRootDir: Root directory of the Unreal project
+-- @param projectName: Name of the Unreal project
+-- @return: Parsed configuration data or nil if invalid/created
 function Commands._EnsureConfigFile(projectRootDir, projectName)
     local configFilePath = projectRootDir.."/".. kConfigFileName
     local configFile = io.open(configFilePath, "r")
@@ -244,7 +192,7 @@ function Commands._EnsureConfigFile(projectRootDir, projectName)
 
     if (not configFile) then
         Commands._CreateConfigFile(configFilePath, projectName)
-        PrintAndLogMessage("created config file")
+        log_util.PrintAndLogMessage("created config file")
         return nil
     end
 
@@ -254,29 +202,24 @@ function Commands._EnsureConfigFile(projectRootDir, projectName)
     local data = vim.fn.json_decode(content)
     Commands:Inspect(data)
     if data and (data.version ~= kCurrentVersion) then
-        PrintAndLogError("Your " .. configFilePath .. " format is incompatible. Please back up this file somewhere and then delete this one, you will be asked to create a new one") 
+        log_util.PrintAndLogError("Your " .. configFilePath .. " format is incompatible. Please back up this file somewhere and then delete this one, you will be asked to create a new one") 
         data = nil
     end
 
     if data then
-        data.EngineDir = MakeUnixPath(data.EngineDir)
+        data.EngineDir = file_util.MakeUnixPath(data.EngineDir)
     end
 
     return data
 end
 
-function Commands._GetDefaultProjectNameAndDir(filepath)
-    local uprojectPath, projectDir
-    projectDir, uprojectPath = Commands._find_file_with_extension(filepath, "uproject")
-    if not uprojectPath then
-        PrintAndLogMessage("Failed to determine project name, could not find the root of the project that contains the .uproject")
-        return nil, nil
-    end
-    local projectName = vim.fn.fnamemodify(uprojectPath, ":t:r")
-    return projectName, projectDir
-end
 
+
+-- Global variable to store the path of the generated compile_commands.json file
 local CurrentCompileCommandsTargetFilePath = ""
+
+-- Returns a string representation of the current task and its status
+-- @return: String in format "taskName->status" or "[No Task]"
 function CurrentGenData:GetTaskAndStatus()
     if not self or not self.currentTask or self.currentTask == "" then
         return "[No Task]"
@@ -285,6 +228,9 @@ function CurrentGenData:GetTaskAndStatus()
     return self.currentTask.."->".. status
 end
 
+-- Gets the status of a specific task
+-- @param taskName: Name of the task to check
+-- @return: Task status string or "none" if task doesn't exist
 function CurrentGenData:GetTaskStatus(taskName)
     local status = self.tasks[taskName]
 
@@ -294,32 +240,33 @@ function CurrentGenData:GetTaskStatus(taskName)
     return status
 end
 
+-- Sets the status of a task and manages task transitions
+-- Prevents starting new tasks while another is in progress
+-- @param taskName: Name of the task to update
+-- @param newStatus: New status for the task
 function CurrentGenData:SetTaskStatus(taskName, newStatus)
     if (self.currentTask ~= "" and self.currentTask ~= taskName) and (self:GetTaskStatus(self.currentTask) ~= TaskState.completed) then
-        PrintAndLogMessage("Cannot start a new task. Current task still in progress " .. self.currentTask)
-        PrintAndLogError("Cannot start a new task. Current task still in progress " .. self.currentTask)
+        log_util.PrintAndLogMessage("Cannot start a new task. Current task still in progress " .. self.currentTask)
+        log_util.PrintAndLogError("Cannot start a new task. Current task still in progress " .. self.currentTask)
         return
     end
-    PrintAndLogMessage("SetTaskStatus: " .. taskName .. "->" .. newStatus)
+    log_util.PrintAndLogMessage("SetTaskStatus: " .. taskName .. "->" .. newStatus)
     self.currentTask = taskName
     self.tasks[taskName] = newStatus
 end
 
+-- Clears all task states and resets current task
 function CurrentGenData:ClearTasks()
     self.tasks = {}
     self.currentTask = ""
 end
 
-local function file_exists(name)
-   local f = io.open(name, "r")
-   if f then
-      io.close(f)
-      return true
-   end
 
-   return false
-end
 
+-- Extracts and converts MSVC response file format to clang-compatible format
+-- Converts MSVC compiler flags to clang flags and adds Unreal Engine specific includes
+-- @param rsppath: Path to the MSVC response file
+-- @return: Converted clang-compatible response file content
 function ExtractRSP(rsppath)
     local extraFlags = "-std=c++20 -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -ferror-limit=0 -Wno-inconsistent-missing-override"
     local extraIncludes = {
@@ -328,10 +275,10 @@ function ExtractRSP(rsppath)
     }
 
     rsppath = rsppath:gsub("\\\\","/")
-    PrintAndLogMessage(rsppath)
+    log_util.PrintAndLogMessage(rsppath)
 
-    if not file_exists(rsppath) then
-       PrintAndLogMessage("rsppath doesn't exists: " .. rsppath)
+    if not file_util.file_exists(rsppath) then
+       log_util.PrintAndLogMessage("rsppath doesn't exists: " .. rsppath)
        return
     end
 
@@ -371,32 +318,18 @@ function ExtractRSP(rsppath)
     return table.concat(lines)
 end
 
+-- Placeholder function for creating command lines (currently unused)
 function CreateCommandLine()
 end
 
-function EscapePath(path)
-    -- path = path:gsub("\\", "\\\\")
-    path = path:gsub("\\\\", "/")
-    path = path:gsub("\\", "/")
-    path = path:gsub("\"", "\\\"")
-    return path
-end
-function EnsureDirPath(path)
-    PrintAndLogMessage("Ensuring path exists: "..path)
-    -- os.execute("mkdir -p " .. path)
-    local handle = io.popen("cmd.exe /c mkdir \"" .. path.. "\"")
-    handle:flush()
-    local result = handle:read("*a")
-    handle:close()
-end
 
-local function IsEngineFile(path, start)
-    local unixPath = MakeUnixPath(path)
-    local unixStart = MakeUnixPath(start)
-    local startIndex, _ = string.find(unixPath, unixStart, 1, true)
-    return startIndex ~= nil
-end
 
+
+
+
+-- Checks if a window is a quickfix window
+-- @param winid: Window ID to check
+-- @return: true if window is quickfix, false otherwise
 local function IsQuickfixWin(winid)
     if not vim.api.nvim_win_is_valid(winid) then return false end
     local bufnr = vim.api.nvim_win_get_buf(winid)
@@ -405,6 +338,8 @@ local function IsQuickfixWin(winid)
     return buftype == 'quickfix'
 end
 
+-- Finds the quickfix window ID
+-- @return: Window ID of quickfix window or nil if not found
 local function GetQuickfixWinId()
     local quickfix_winid = nil
 
@@ -418,8 +353,10 @@ local function GetQuickfixWinId()
     return quickfix_winid
 end
 
+-- Global variable to store the quickfix window ID
 Commands.QuickfixWinId = 0
 
+-- Scrolls the quickfix window to the bottom to show latest entries
 local function ScrollQF()
     if not IsQuickfixWin(Commands.QuickfixWinId) then
         Commands.QuickfixWinId = GetQuickfixWinId()
@@ -432,21 +369,28 @@ local function ScrollQF()
     end
 end
 
+-- Appends an entry to the quickfix list and scrolls to show it
+-- @param entry: Quickfix entry to add
 local function AppendToQF(entry)
     vim.fn.setqflist({}, 'a', { items = { entry } })
     ScrollQF()
 end
 
+-- Safely deletes an autocmd by ID
+-- @param AutocmdId: ID of the autocmd to delete
 local function DeleteAutocmd(AutocmdId)
     local success, _ = pcall(function()
         vim.api.nvim_del_autocmd(AutocmdId)
     end)
 end
 
+-- Main stage function for processing UBT-generated compile_commands.json
+-- Converts MSVC compiler commands to clang-compatible format and creates response files
+-- This is a coroutine that yields to allow UI updates during processing
 function Stage_UbtGenCmd()
     coroutine.yield()
     Commands.BeginTask("gencmd")
-    PrintAndLogMessage("callback called!")
+    log_util.PrintAndLogMessage("callback called!")
     local outputJsonPath = CurrentGenData.config.EngineDir .. "/compile_commands.json"
 
     local rspdir = CurrentGenData.prjDir .. "/Intermediate/clangRsp/" .. 
@@ -454,7 +398,7 @@ function Stage_UbtGenCmd()
     CurrentGenData.target.Configuration .. "/"
 
     -- all these replaces are slow, could be rewritten as a parser
-    EnsureDirPath(rspdir)
+    file_util.EnsureDirPath(rspdir)
 
     -- replace bad compiler
     local file_path = outputJsonPath
@@ -463,8 +407,8 @@ function Stage_UbtGenCmd()
     local new_text = "Llvm/x64/bin/clang++.exe"
 
     local contentLines = {}
-    PrintAndLogMessage("processing compile_commands.json and writing response files")
-    PrintAndLogMessage(file_path)
+    log_util.PrintAndLogMessage("processing compile_commands.json and writing response files")
+    log_util.PrintAndLogMessage(file_path)
 
     local skipEngineFiles = true
     if CurrentGenData.WithEngine then
@@ -484,8 +428,8 @@ function Stage_UbtGenCmd()
             coroutine.yield()
 
             -- show progress
-            logWithVerbosity(kLogLevel_Verbose, "Preparing for LSP symbol parsing: " .. currentFilename)
-            local isEngineFile = IsEngineFile(currentFilename, CurrentGenData.config.EngineDir)
+            log_util.logWithVerbosity(log_util.kLogLevel_Verbose, "Preparing for LSP symbol parsing: " .. currentFilename)
+            local isEngineFile = file_util.IsEngineFile(currentFilename, CurrentGenData.config.EngineDir)
             local shouldSkipFile = isEngineFile and skipEngineFiles
 
             local qflistentry = {filename = "", lnum = 0, col = 0,
@@ -544,7 +488,7 @@ function Stage_UbtGenCmd()
                 local rspfilepath = rspdir .. rspfilename
 
                 if not shouldSkipFile then
-                    PrintAndLogMessage("Writing rsp: " .. rspfilepath)
+                    log_util.PrintAndLogMessage("Writing rsp: " .. rspfilepath)
 
                     args = args:gsub("-D\\\"", "-D\"")
                     args = args:gsub("-I\\\"", "-I\"")
@@ -564,14 +508,14 @@ function Stage_UbtGenCmd()
                 end
                 coroutine.yield()
 
-                table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" .. EscapePath(rspfilepath) .."\\\""
-                    .. " ".. EscapePath(currentFilename) .."\",\n")
+                table.insert(contentLines, "\t\t\"command\": \"clang++.exe @\\\"" .. file_util.EscapePath(rspfilepath) .."\\\""
+                    .. " ".. file_util.EscapePath(currentFilename) .."\",\n")
             end
         else
             local fbegin, fend = line:find("\"file\": ")
             if fbegin then
                 currentFilename = line:sub(fend+1, -2)
-                logWithVerbosity(kLogLevel_Verbose, "currentfile: " .. currentFilename)
+                log_util.logWithVerbosity(log_util.kLogLevel_Verbose, "currentfile: " .. currentFilename)
             end
             table.insert(contentLines, line .. "\n")
         end
@@ -584,8 +528,8 @@ function Stage_UbtGenCmd()
     file:flush()
     file:close()
 
-    PrintAndLogMessage("finished processing compile_commands.json")
-    PrintAndLogMessage("generating header files with Unreal Header Tool...")
+    log_util.PrintAndLogMessage("finished processing compile_commands.json")
+    log_util.PrintAndLogMessage("generating header files with Unreal Header Tool...")
     Commands.EndTask("gencmd")
     DeleteAutocmd(Commands.gencmdAutocmdid)
 
@@ -605,8 +549,10 @@ function Stage_UbtGenCmd()
     vim.cmd("Dispatch " .. cmd)
 end
 
+-- Called when Unreal Header Tool has finished generating header files
+-- Restarts the LSP to pick up new generated headers and cleans up tasks
 function Stage_GenHeadersCompleted()
-    PrintAndLogMessage("Finished generating header files with Unreal Header Tool...")
+    log_util.PrintAndLogMessage("Finished generating header files with Unreal Header Tool...")
     vim.api.nvim_command('autocmd! ShellCmdPost * lua DispatchUnrealnvimCb()')
     vim.api.nvim_command('LspRestart')
     Commands.EndTask("headers")
@@ -617,6 +563,9 @@ end
 
 Commands.renderedAnim = ""
 
+-- Returns the current status string for display in status bar
+-- Shows animation, task progress, and completion status
+-- @return: Status string for display
  function Commands.GetStatusBar()
      local status = "unset"
     if CurrentGenData:GetTaskStatus("final") == TaskState.completed then
@@ -629,18 +578,24 @@ Commands.renderedAnim = ""
     return status
 end
 
+-- Callback function for dispatch commands
+-- Creates a new coroutine to handle the callback data
+-- @param data: Data passed from the dispatch command
 function DispatchUnrealnvimCb(data)
-     log("DispatchUnrealnvimCb()")
+     log_util.log("DispatchUnrealnvimCb()")
      Commands.taskCoroutine = coroutine.create(FuncBind(DispatchCallbackCoroutine, data))
  end
 
+-- Handles dispatch callbacks and routes to appropriate stage functions
+-- Manages task state transitions based on callback data
+-- @param data: Callback data indicating which stage to execute
 function DispatchCallbackCoroutine(data)
     coroutine.yield()
     if not data then
-        log("data was nil")
+        log_util.log("data was nil")
     end
-    PrintAndLogMessage("DispatchCallbackCoroutine()")
-    PrintAndLogMessage("DispatchCallbackCoroutine() task="..CurrentGenData:GetTaskAndStatus())
+    log_util.PrintAndLogMessage("DispatchCallbackCoroutine()")
+    log_util.PrintAndLogMessage("DispatchCallbackCoroutine() task="..CurrentGenData:GetTaskAndStatus())
     if data == "gencmd" and CurrentGenData:GetTaskStatus("gencmd") == TaskState.scheduled then
         CurrentGenData:SetTaskStatus("gencmd", TaskState.inprogress)
         Commands.taskCoroutine = coroutine.create(Stage_UbtGenCmd)
@@ -649,6 +604,9 @@ function DispatchCallbackCoroutine(data)
     end
 end
 
+-- Prompts user to select a build target from the configuration
+-- Displays available targets and waits for user input
+-- @return: Selected target index as number
 function PromptBuildTargetIndex()
     print("target to build:")
     for i, x in ipairs(CurrentGenData.config.Targets) do
@@ -661,30 +619,38 @@ function PromptBuildTargetIndex()
     return tonumber(vim.fn.input "<number> : ")
 end
 
+-- Gets the current project name with .uproject extension
+-- @return: Project name with .uproject extension or empty string if not found
 function Commands.GetProjectName()
     local current_file_path = vim.api.nvim_buf_get_name(0)
-    local prjName, _ = Commands._GetDefaultProjectNameAndDir(current_file_path)
-    if not prjName  then
+    local prjDir, uprojectPath = file_util.find_file_with_extension(current_file_path, "uproject")
+    if not uprojectPath then
         return "" --"<Unknown.uproject>"
     end
 
-    return CurrentGenData.prjName .. ".uproject"
+    local projectName = vim.fn.fnamemodify(uprojectPath, ":t:r")
+    return projectName .. ".uproject"
 end
 
+-- Initializes the global generation data with project and engine information
+-- Sets up paths, prompts for target selection, and validates configuration
+-- @return: true if initialization successful, false otherwise
 function InitializeCurrentGenData()
-    PrintAndLogMessage("initializing")
+    log_util.PrintAndLogMessage("initializing")
     local current_file_path = vim.api.nvim_buf_get_name(0)
-    CurrentGenData.prjName, CurrentGenData.prjDir = Commands._GetDefaultProjectNameAndDir(current_file_path)
-    if not CurrentGenData.prjName then
-        PrintAndLogMessage("could not find project. aborting")
+    CurrentGenData.prjDir, CurrentGenData.uprojectPath = file_util.find_file_with_extension(current_file_path, "uproject")
+    if not CurrentGenData.uprojectPath then
+        log_util.PrintAndLogMessage("could not find project. aborting")
         return false
     end
+    
+    CurrentGenData.prjName = vim.fn.fnamemodify(CurrentGenData.uprojectPath, ":t:r")
 
     CurrentGenData.config = Commands._EnsureConfigFile(CurrentGenData.prjDir,
         CurrentGenData.prjName)
 
     if not CurrentGenData.config then
-        PrintAndLogMessage("no config file. aborting")
+        log_util.PrintAndLogMessage("no config file. aborting")
         return false
     end
 
@@ -701,31 +667,40 @@ function InitializeCurrentGenData()
         CurrentGenData.targetNameSuffix = "Editor"
     end
 
-    PrintAndLogMessage("Using engine at:"..CurrentGenData.config.EngineDir)
+    log_util.PrintAndLogMessage("Using engine at:"..CurrentGenData.config.EngineDir)
 
     return true
 end
 
+-- Schedules a task to be executed (sets status to scheduled)
+-- @param taskName: Name of the task to schedule
 function Commands.ScheduleTask(taskName)
-    PrintAndLogMessage("ScheduleTask: " .. taskName)
+    log_util.PrintAndLogMessage("ScheduleTask: " .. taskName)
     CurrentGenData:SetTaskStatus(taskName, TaskState.scheduled)
 end
 
+-- Clears all task states and resets current task
 function Commands.ClearTasks()
     CurrentGenData:ClearTasks()
 end
 
+-- Begins execution of a task (sets status to inprogress)
+-- @param taskName: Name of the task to begin
 function Commands.BeginTask(taskName)
-    PrintAndLogMessage("BeginTask: " .. taskName)
+    log_util.PrintAndLogMessage("BeginTask: " .. taskName)
     CurrentGenData:SetTaskStatus(taskName, TaskState.inprogress)
 end
 
+-- Marks a task as completed and cleans up coroutine
+-- @param taskName: Name of the task to complete
 function Commands.EndTask(taskName)
-    PrintAndLogMessage("EndTask: " .. taskName)
+    log_util.PrintAndLogMessage("EndTask: " .. taskName)
     CurrentGenData:SetTaskStatus(taskName, TaskState.completed)
     Commands.taskCoroutine = nil
 end
 
+-- Callback function called when build process completes
+-- Cleans up tasks and sets idle animation
 function BuildComplete()
     Commands.EndTask("build")
     Commands.EndTask("final")
@@ -733,6 +708,8 @@ function BuildComplete()
     DeleteAutocmd(Commands.buildAutocmdid)
 end
 
+-- Coroutine function that handles the build process
+-- Sets up autocmd for completion callback and dispatches build command
 function Commands.BuildCoroutine()
     Commands.buildAutocmdid = vim.api.nvim_create_autocmd("ShellCmdPost",
         {
@@ -751,9 +728,12 @@ function Commands.BuildCoroutine()
 
 end
 
+-- Main build command function
+-- Initializes project data and starts build process
+-- @param opts: Build options (currently unused)
 function Commands.build(opts)
     CurrentGenData:ClearTasks()
-    PrintAndLogMessage("Building uproject")
+    log_util.PrintAndLogMessage("Building uproject")
 
     if not InitializeCurrentGenData() then
         return
@@ -766,9 +746,12 @@ function Commands.build(opts)
 
 end
 
+-- Main run command function
+-- Determines whether to run editor or game executable and dispatches command
+-- @param opts: Run options (currently unused)
 function Commands.run(opts)
     CurrentGenData:ClearTasks()
-    PrintAndLogMessage("Running uproject")
+    log_util.PrintAndLogMessage("Running uproject")
     
     if not InitializeCurrentGenData() then
         return
@@ -803,13 +786,15 @@ function Commands.run(opts)
         cmd = executablePath
     end
 
-    PrintAndLogMessage(cmd)
+    log_util.PrintAndLogMessage(cmd)
     vim.cmd("compiler msvc")
     vim.cmd("Dispatch " .. cmd)
     Commands.EndTask("run")
     Commands.EndTask("final")
 end
 
+-- Ensures the update loops are started for UI and logic updates
+-- Only starts once to avoid duplicate timers
 function Commands.EnsureUpdateStarted()
     if Commands.cbTimer then return end
 
@@ -824,11 +809,14 @@ function Commands.EnsureUpdateStarted()
     vim.schedule(Commands.safeLogicUpdate)
 end
 
+-- Main command generation function
+-- Sets up autocmd for callback and starts the generation coroutine
+-- @param opts: Generation options including WithEngine flag
 function Commands.generateCommands(opts)
-    log(Commands.Inspect(opts))
+    log_util.log(Commands.Inspect(opts))
 
     if not InitializeCurrentGenData() then
-        PrintAndLogMessage("init failed")
+        log_util.PrintAndLogMessage("init failed")
         return
     end
 
@@ -843,21 +831,25 @@ function Commands.generateCommands(opts)
             callback = FuncBind(DispatchUnrealnvimCb, "gencmd")
         })
 
-    PrintAndLogMessage("listening to ShellCmdPost")
+    log_util.PrintAndLogMessage("listening to ShellCmdPost")
     --vim.cmd("compiler msvc")
-    PrintAndLogMessage("compiler set to msvc")
+    log_util.PrintAndLogMessage("compiler set to msvc")
 
     Commands.taskCoroutine = coroutine.create(Commands.generateCommandsCoroutine)
     Commands.EnsureUpdateStarted()
 end
 
 
+-- Main update loop for UI animations and status updates
+-- Calculates elapsed time and updates UI elements
 function Commands.updateLoop()
     local elapsedTime = vim.loop.now() - Commands.lastUpdateTime
     Commands:uiUpdate(elapsedTime)
     Commands.lastUpdateTime = vim.loop.now()
 end
 
+-- Safe wrapper for the update loop that catches errors
+-- Prevents crashes from breaking the update timer
 function Commands.safeUpdateLoop()
     local success, errmsg = pcall(Commands.updateLoop)
     if not success then
@@ -868,6 +860,9 @@ end
 local gtimer = 0
 local resetCount = 0
 
+-- Updates UI animations based on elapsed time
+-- Cycles through animation frames at specified intervals
+-- @param delta: Elapsed time since last update
 function Commands:uiUpdate(delta)
     local animFrameCount = 4
     local animFrameDuration = 200
@@ -896,6 +891,8 @@ function Commands:uiUpdate(delta)
     Commands.renderedAnim = (anim[index] or "")
 end
 
+-- Safe wrapper for logic updates that catches errors
+-- Schedules itself to run again after 1ms
 function Commands.safeLogicUpdate()
     local success, errmsg = pcall(function() Commands:LogicUpdate() end)
 
@@ -905,6 +902,8 @@ function Commands.safeLogicUpdate()
     vim.defer_fn(Commands.safeLogicUpdate, 1)
 end
 
+-- Main logic update function that manages coroutines
+-- Resumes task coroutines and schedules status updates
 function Commands:LogicUpdate()
     if self.taskCoroutine then
         if coroutine.status(self.taskCoroutine) ~= "dead"  then
@@ -920,14 +919,12 @@ function Commands:LogicUpdate()
     vim.defer_fn(Commands.onStatusUpdate, 1)
 end
 
- local function GetInstallDir()
-    local packer_install_dir = vim.fn.stdpath('data') .. '/site/pack/packer/start/'
-    return packer_install_dir .. "Unreal.nvim//"
-end
 
-local mydbg = true
+
+-- Sets the current animation from the spinners.json file
+-- @param animationName: Name of the animation to load
 function Commands:SetCurrentAnimation(animationName)
-    local jsonPath = GetInstallDir() .. "lua/spinners.json"
+    local jsonPath = file_util.GetInstallDir() .. "lua/spinners.json"
     local file = io.open(jsonPath, "r")
     if file then
         local content = file:read("*all")
@@ -936,15 +933,17 @@ function Commands:SetCurrentAnimation(animationName)
     end
 end
 
+-- Coroutine function that generates clang-compatible compile commands
+-- Sets up animation, schedules tasks, and dispatches UBT command
 function Commands.generateCommandsCoroutine()
-    PrintAndLogMessage("Generating clang-compatible compile_commands.json")
+    log_util.PrintAndLogMessage("Generating clang-compatible compile_commands.json")
     Commands:SetCurrentAnimation("kirbyFlip")
     coroutine.yield()
     Commands.ClearTasks()
 
     local editorFlag = ""
     if CurrentGenData.config.withEditor then
-        PrintAndLogMessage("Building editor")
+        log_util.PrintAndLogMessage("Building editor")
         editorFlag = "-Editor"
     end
 
@@ -956,63 +955,27 @@ function Commands.generateCommandsCoroutine()
     CurrentGenData.prjName .. CurrentGenData.targetNameSuffix .. " " .. CurrentGenData.target.Configuration .. " " ..
     CurrentGenData.target.PlatformName
 
-    PrintAndLogMessage("Dispatching command:")
-    PrintAndLogMessage(cmd)
+    log_util.PrintAndLogMessage("Dispatching command:")
+    log_util.PrintAndLogMessage(cmd)
     CurrentCompileCommandsTargetFilePath =  CurrentGenData.prjDir .. "/compile_commands.json"
     vim.api.nvim_command("Dispatch " .. cmd)
-    PrintAndLogMessage("Dispatched")
+    log_util.PrintAndLogMessage("Dispatched")
 end
 
+-- Changes the current working directory to the Unreal project root
+-- Useful for making Telescope and other tools search only in the project directory
 function Commands.SetUnrealCD()
     local current_file_path = vim.api.nvim_buf_get_name(0)
-    local prjName, prjDir = Commands._GetDefaultProjectNameAndDir(current_file_path)
+    local prjDir, uprojectPath = file_util.find_file_with_extension(current_file_path, "uproject")
     if prjDir then
         vim.cmd("cd " .. prjDir)
     else
-        PrintAndLogMessage("Could not find unreal project root directory, make sure you have the correct buffer selected")
+        log_util.PrintAndLogMessage("Could not find unreal project root directory, make sure you have the correct buffer selected")
     end
 end
 
 
-function Commands._check_extension_in_directory(directory, extension)
-    local dir = vim.loop.fs_opendir(directory)
-    if not dir then
-        return nil
-    end
 
-    handle = vim.loop.fs_scandir(directory) 
-    local name, typ
-
-    while handle do
-        name, typ = vim.loop.fs_scandir_next(handle)
-        if not name then break end
-        local ext = vim.fn.fnamemodify(name, ":e")
-        if ( ext == "uproject" ) then
-            return directory.."/"..name
-        end
-    end
-    return nil
-end
-
-function Commands._find_file_with_extension(filepath, extension)
-    local current_dir = vim.fn.fnamemodify(filepath, ":h")
-    local parent_dir = vim.fn.fnamemodify(current_dir, ":h")
-    -- Check if the file exists in the current directory
-    local filename = vim.fn.fnamemodify(filepath, ":t")
-
-    local full_path = Commands._check_extension_in_directory(current_dir, extension)
-    if full_path then
-        return current_dir, full_path
-    end
-
-    -- Recursively check parent directories until we find the file or reach the root directory
-    if current_dir ~= parent_dir then
-        return Commands._find_file_with_extension(parent_dir .. "/" .. filename, extension)
-    end
-
-    -- File not found
-    return nil
-end
 
 
 return Commands
