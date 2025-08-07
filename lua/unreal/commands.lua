@@ -310,6 +310,16 @@ function CurrentGenData:ClearTasks()
     self.currentTask = ""
 end
 
+local function file_exists(name)
+   local f = io.open(name, "r")
+   if f then
+      io.close(f)
+      return true
+   end
+
+   return false
+end
+
 function ExtractRSP(rsppath)
     local extraFlags = "-std=c++20 -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -ferror-limit=0 -Wno-inconsistent-missing-override"
     local extraIncludes = {
@@ -319,6 +329,11 @@ function ExtractRSP(rsppath)
 
     rsppath = rsppath:gsub("\\\\","/")
     PrintAndLogMessage(rsppath)
+
+    if not file_exists(rsppath) then
+       PrintAndLogMessage("rsppath doesn't exists: " .. rsppath)
+       return
+    end
 
     local lines = {}
     local isFirstLine = true
@@ -499,7 +514,7 @@ function Stage_UbtGenCmd()
                 end
 
                 local rsppath = line:sub(j+1, endpos-1)
-                if rsppath then
+                if rsppath and file_exists(rsppath) then
                     local newrsppath = rsppath .. ".clang.rsp"
 
                     -- rewrite rsp contents
