@@ -12,7 +12,7 @@ Unreal Engine support for Neovim
 **Installation**
 
 Install with packer:
-```
+```lua
   use {'zadirion/Unreal.nvim',
     requires =
     {
@@ -21,6 +21,34 @@ Install with packer:
     }
   }
 ```
+
+**LSP Configuration**
+
+You will want to configure your neovim LSP client to use the clangd we just downloaded:
+
+```lua
+local clangd_cmd = {
+  [[C:\Program Files\LLVM\bin\clangd.exe]],   -- use this clangd
+  "--compile-commands-dir=.",                 -- adjust if your CDB lives elsewhere
+  -- Helps clangd discover system includes from this LLVM toolchain
+  [[--query-driver=C:\Program Files\LLVM\bin\clang*.exe]],
+  -- Optional goodies:
+  "--clang-tidy=1",
+  "--log=verbose",
+  "--pretty",
+}
+
+require('lspconfig').clangd.setup{
+	cmd = clangd_cmd,
+	root_dir = require('lspconfig.util').root_pattern("compile_commands.json", ".git"),
+	on_attach = on_attach,
+}
+```
+Either source your init.lua or restart neovim, after which open a cpp file in your project and type :LspInfo and confirm you have an active client. And the command path points indeed to the clangd.exe inside program files' LLVM
+
+
+**Initiall commands**
+
 After installing with packer, open one of your Unreal project's source files, and run `UnrealGenWithEngine`. This will go through all the engine source files and will generate a compatible clang compile-command for each, so that the lsp can properly parse them.
 It will take a long time to go through all of them, but you only need to run this command once, for your engine.
 After running it for the first time, it will open a configuration file in a new buffer. In this buffer set the value of the `"EngineDir"` key to the path to Unreal Engine on your system. For example,
@@ -29,7 +57,7 @@ After running it for the first time, it will open a configuration file in a new 
 // UnrealNvim.json
 {
   "version": "0.0.2",
-  "EngineDir": "C:\\Program Files\\Epic Games\\UE_5.4\\"
+  "EngineDir": "C:\\Program Files\\Epic Games\\UE_5.4\\",
   "Targets": [
     // ...
   ]
