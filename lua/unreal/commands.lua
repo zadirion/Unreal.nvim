@@ -299,7 +299,58 @@ function CurrentGenData:ClearTasks()
     self.currentTask = ""
 end
 
+-- extract the include paths from the vcxproj file 
+-- will extract them from the <IncludePath> tags found under Project/PropertyGroup/IncludePath xml path
+-- only extracts the paths that start with the engine dir and end in UHT
+-- returns a table of paths
+---@param Configuration string Configuration to extract include paths from
+---@return string[] List of include paths 
+function ExtractIncludePathsFromVCXProj(Configuration)
+    local includePaths = {}
+    
+    -- Construct the path to the VCXProj file
+    -- VCXProj files are typically located in the project's Intermediate/ProjectFiles directory
+    local vcxprojPath = CurrentGenData.prjDir .. "/Intermediate/ProjectFiles/" .. CurrentGenData.prjName .. ".vcxproj"
+    
+    -- Convert to Unix path format
+    vcxprojPath = vcxprojPath:gsub("\\\\", "/")
+    
+    if not file_util.file_exists(vcxprojPath) then
+        return includePaths
+    end
+    
+    -- Read the VCXProj file
+    local file = io.open(vcxprojPath, "r")
+    if not file then
+        return includePaths
+    end
+    
+    local content = file:read("*all")
+    file:close()
+    
+    local engineDir = CurrentGenData.config.EngineDir:gsub("\\", "/")
+    -- Find all PropertyGroup sections and extract IncludePath tags from them
+    -- The IncludePath tags are located at Project/PropertyGroup/IncludePath path
+    for propertyGroupContent in content:gmatch('<PropertyGroup[^>]*>(.-)</PropertyGroup>') do
+        -- Look for IncludePath tags within this PropertyGroup
+        for includePath in propertyGroupContent:gmatch('<IncludePath>([^<]+)</IncludePath>') do
+            -- Split the include path by semicolon (MSVC format)
+            for path in includePath:gmatch('[^;]+') do
+                path = path:gsub("\\", "/") -- Convert backslashes to forward slashes
+                
+                -- Check if path starts with engine directory and ends with "UHT"
+                if path:find("^" .. engineDir) and path:find("/UHT/?$") then
+                    table.insert(includePaths, path)
+                end
+            end
+        end
+    end
 
+    -- log how many include paths were found
+    log_util.PrintAndLogMessage("Found " .. #includePaths .. " UHT include paths from VCXProj")
+ 
+    return includePaths
+end
 
 -- Extracts and converts MSVC response file format to clang-compatible format
 -- Converts MSVC compiler flags to clang flags and adds Unreal Engine specific includes
@@ -311,13 +362,15 @@ function ExtractRSP(rsppath)
         "Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h",
         "Engine/Source/Runtime/Core/Public/Misc/EnumRange.h"
     }
+
+
     local extraIncludeDirs = {
-        "Engine/Source/Runtime/Core/Public",
         "Engine/Source/Runtime/Core/Public",
         "Engine/Source/Runtime/CoreUObject/Public",
         "Engine/Source/Runtime/TraceLog/Public",
         "Engine/Source/Runtime/AutoRTFM/Public",
-        "Engine/Source/Runtime/Engine/Classes"
+        "Engine/Source/Runtime/Engine/Classes",
+        "Engine/Source/Runtime/Engine/Public"
     }
 
     rsppath = rsppath:gsub("\\\\","/")
@@ -359,8 +412,30 @@ function ExtractRSP(rsppath)
         lineNb = lineNb + 1
     end
     
+    -- UnrealEditor if withEditor is true, otherwise UnrealGame
+    local TargetName = CurrentGenData.target.withEditor and "UnrealEditor" or "UnrealGame"
+
+    -- form the UTH include path based on the uproject dir, target config, architecture and project name
+    -- will be something like "E:\UnrealProj_5.6\MyProject\Intermediate\Build\Win64\UnrealEditor\Inc\MyProject\UHT\"
+    local uthIncludePath = CurrentGenData.prjDir ..
+        "/Intermediate/Build/" ..
+        CurrentGenData.target.PlatformName ..
+        "/" .. TargetName .. "/Inc/" .. CurrentGenData.prjName .. "/UHT/"
+
+    -- add uthincludepath as include to lines
+    lines[lineNb] = "\n" .. "-I \"" .. uthIncludePath .. "\""
+    lineNb = lineNb + 1
+
+    -- add the extra include dirs to lines
     for _, dir in ipairs(extraIncludeDirs) do
         lines[lineNb] ="\n" .. "-I \"" .. CurrentGenData.config.EngineDir .. "/" .. dir .. "\""
+        lineNb = lineNb + 1
+    end
+
+    -- add the include paths from the vcxproj file for the given configuration
+    local includePaths = ExtractIncludePathsFromVCXProj(CurrentGenData.target.Configuration)
+    for _, path in ipairs(includePaths) do
+        lines[lineNb] ="\n" .. "-I \"" .. path .. "\""
         lineNb = lineNb + 1
     end
     
@@ -1041,3 +1116,5 @@ end
 
 
 return Commands
+
+
