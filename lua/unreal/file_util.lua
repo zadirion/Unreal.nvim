@@ -2,8 +2,8 @@
 -- Contains path manipulation and file system operations
 
 -- Converts Windows path format to Unix path format
--- @param win_path: Windows path with backslashes
--- @return: Unix path with forward slashes
+---@param win_path string|nil Windows path with backslashes
+---@return string|nil Unix path with forward slashes
 local function MakeUnixPath(win_path)
     if not win_path then
         return nil
@@ -19,8 +19,8 @@ end
 
 -- Escapes a path for use in command line arguments
 -- Converts backslashes to forward slashes and escapes quotes
--- @param path: Path to escape
--- @return: Escaped path string
+---@param path string|nil Path to escape
+---@return string Escaped path string
 local function EscapePath(path)
     if not path then
         return ""
@@ -33,8 +33,8 @@ local function EscapePath(path)
 end
 
 -- Checks if a file exists
--- @param name: Path to the file to check
--- @return: true if file exists, false otherwise
+---@param name string|nil Path to the file to check
+---@return boolean true if file exists, false otherwise
 local function file_exists(name)
    if not name then
       return false
@@ -50,7 +50,7 @@ end
 
 -- Creates a directory path if it doesn't exist
 -- Uses Windows mkdir command
--- @param path: Directory path to create
+---@param path string|nil Directory path to create
 local function EnsureDirPath(path)
     if not path then
         return
@@ -58,15 +58,15 @@ local function EnsureDirPath(path)
     local handle = io.popen("cmd.exe /c mkdir \"" .. path.. "\"")
     if handle then
         handle:flush()
-        handle:read("*a")
+        local _ = handle:read("*a")
         handle:close()
     end
 end
 
 -- Checks if a file path is within the Unreal Engine directory
--- @param path: File path to check
--- @param start: Engine root path to check against
--- @return: true if file is in engine directory, false otherwise
+---@param path string|nil File path to check
+---@param start string|nil Engine root path to check against
+---@return boolean true if file is in engine directory, false otherwise
 local function IsEngineFile(path, start)
     if not path or not start then
         return false
@@ -81,9 +81,9 @@ local function IsEngineFile(path, start)
 end
 
 -- Checks if a file with the specified extension exists in a directory
--- @param directory: Directory to search in
--- @param extension: File extension to look for (e.g., "uproject")
--- @return: Full path to the file if found, nil otherwise
+---@param directory string|nil Directory to search in
+---@param extension string|nil File extension to look for (e.g., "uproject")
+---@return string|nil Full path to the file if found, nil otherwise
 local function check_extension_in_directory(directory, extension)
     if not directory or not extension then
         return nil
@@ -108,9 +108,9 @@ end
 
 -- Recursively searches for a file with the specified extension
 -- Searches upward from the given filepath until root directory
--- @param filepath: Starting path to search from
--- @param extension: File extension to look for
--- @return: directory, full_path if found, nil, nil otherwise
+---@param filepath string|nil Starting path to search from
+---@param extension string|nil File extension to look for
+---@return string|nil directory, full_path if found, nil, nil otherwise
 local function find_file_with_extension(filepath, extension)
     if not filepath or not extension then
         return nil, nil
@@ -118,8 +118,6 @@ local function find_file_with_extension(filepath, extension)
     
     local current_dir = vim.fn.fnamemodify(filepath, ":h")
     local parent_dir = vim.fn.fnamemodify(current_dir, ":h")
-    -- Check if the file exists in the current directory
-    local filename = vim.fn.fnamemodify(filepath, ":t")
 
     local full_path = check_extension_in_directory(current_dir, extension)
     if full_path then
@@ -128,6 +126,7 @@ local function find_file_with_extension(filepath, extension)
 
     -- Recursively check parent directories until we find the file or reach the root directory
     if current_dir ~= parent_dir then
+        local filename = vim.fn.fnamemodify(filepath, ":t")
         return find_file_with_extension(parent_dir .. "/" .. filename, extension)
     end
 
@@ -136,15 +135,15 @@ local function find_file_with_extension(filepath, extension)
 end
 
 -- Gets the installation directory of the Unreal.nvim plugin
--- @return: Path to the plugin installation directory
+---@return string Path to the plugin installation directory
 local function GetInstallDir()
     local packer_install_dir = vim.fn.stdpath('data') .. '/site/pack/packer/start/'
     return packer_install_dir .. "Unreal.nvim//"
 end
 
 -- Splits a string into an array of lines
--- @param str: The string to split
--- @return: Array of lines
+---@param str string|nil The string to split
+---@return string[] Array of lines
 local function SplitString(str)
     if not str then
         return {}

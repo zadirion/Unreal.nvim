@@ -4,6 +4,7 @@ local kConfigFileName = "UnrealNvim.json"  -- Name of the configuration file
 local kCurrentVersion = "0.0.2"            -- Current version of the configuration format
 
 -- Task state enumeration for tracking build/process states
+---@enum TaskState
 local TaskState =
 {
     scheduled = "scheduled",    -- Task is queued but not yet started
@@ -20,13 +21,44 @@ end
 local file_util = require("unreal.file_util")
 local log_util = require("unreal.log_util")
 
+-- Type definitions for better IDE support
+---@class TargetConfig
+---@field TargetName string
+---@field Configuration string
+---@field withEditor boolean
+---@field UbtExtraFlags string
+---@field PlatformName string
 
+---@class UnrealConfig
+---@field version string
+---@field EngineDir string
+---@field Targets TargetConfig[]
+---@field withEditor boolean|nil
+
+---@class CurrentGenData
+---@field config UnrealConfig|table
+---@field target TargetConfig|nil
+---@field prjName string|nil
+---@field targetNameSuffix string|nil
+---@field prjDir string|nil
+---@field tasks table<string, string>
+---@field currentTask string
+---@field ubtPath string
+---@field ueBuildBat string
+---@field projectPath string
+---@field logFile userdata|nil
+---@field uprojectPath string|nil
+---@field WithEngine boolean|nil
+---@field GetTaskAndStatus fun(self): string
+---@field GetTaskStatus fun(self, taskName: string): string
+---@field SetTaskStatus fun(self, taskName: string, newStatus: string)
+---@field ClearTasks fun(self)
 
 -- Creates a function that calls the given function with the specified data
 -- Used for creating callback functions with bound data
--- @param func: The function to bind
--- @param data: The data to pass to the function
--- @return: A new function that calls func(data)
+---@param func function The function to bind
+---@param data any The data to pass to the function
+---@return function A new function that calls func(data)
 local function FuncBind(func, data)
     return function()
         func(data)
@@ -38,6 +70,7 @@ if not vim.g.unrealnvim_loaded then
     Commands = {}
 
     -- Global data structure for tracking current generation/build state
+    ---@type CurrentGenData
     CurrentGenData =
     {
         config = {},              -- Configuration data from UnrealNvim.json
@@ -72,7 +105,7 @@ Commands.LogLevel_Verbose = log_util.kLogLevel_Verbose
 Commands.LogLevel_VeryVerbose = log_util.kLogLevel_VeryVerbose
 
 -- Logs a message using the error logging function
--- @param msg: The message to log
+---@param msg string The message to log
 function Commands.Log(msg)
     log_util.PrintAndLogError(msg)
 end
@@ -83,8 +116,8 @@ end
 
 -- Inspects an object for debugging purposes using the inspect.lua library
 -- Only works when debugging is enabled
--- @param objToInspect: The object to inspect
--- @return: String representation of the object
+---@param objToInspect any The object to inspect
+---@return string|nil String representation of the object
 function Commands:Inspect(objToInspect)
     if not vim.g.unrealnvim_debug then return end
     if not objToInspect then
@@ -113,8 +146,8 @@ end
 
 -- Creates a new configuration file with default Unreal Engine build targets
 -- Opens the file in a new buffer for user editing
--- @param configFilePath: Path where to create the config file
--- @param projectName: Name of the Unreal project
+---@param configFilePath string Path where to create the config file
+---@param projectName string Name of the Unreal project
 function Commands._CreateConfigFile(configFilePath, projectName)
     local configContents = [[
 {
@@ -182,9 +215,9 @@ end
 
 -- Ensures a configuration file exists and is valid
 -- Creates a new config file if it doesn't exist, validates version if it does
--- @param projectRootDir: Root directory of the Unreal project
--- @param projectName: Name of the Unreal project
--- @return: Parsed configuration data or nil if invalid/created
+---@param projectRootDir string Root directory of the Unreal project
+---@param projectName string Name of the Unreal project
+---@return UnrealConfig|nil Parsed configuration data or nil if invalid/created
 function Commands._EnsureConfigFile(projectRootDir, projectName)
     local configFilePath = projectRootDir.."/".. kConfigFileName
     local configFile = io.open(configFilePath, "r")
@@ -219,7 +252,7 @@ end
 local CurrentCompileCommandsTargetFilePath = ""
 
 -- Returns a string representation of the current task and its status
--- @return: String in format "taskName->status" or "[No Task]"
+---@return string String in format "taskName->status" or "[No Task]"
 function CurrentGenData:GetTaskAndStatus()
     if not self or not self.currentTask or self.currentTask == "" then
         return "[No Task]"
@@ -229,8 +262,8 @@ function CurrentGenData:GetTaskAndStatus()
 end
 
 -- Gets the status of a specific task
--- @param taskName: Name of the task to check
--- @return: Task status string or "none" if task doesn't exist
+---@param taskName string Name of the task to check
+---@return string Task status string or "none" if task doesn't exist
 function CurrentGenData:GetTaskStatus(taskName)
     local status = self.tasks[taskName]
 
@@ -242,8 +275,8 @@ end
 
 -- Sets the status of a task and manages task transitions
 -- Prevents starting new tasks while another is in progress
--- @param taskName: Name of the task to update
--- @param newStatus: New status for the task
+---@param taskName string Name of the task to update
+---@param newStatus string New status for the task
 function CurrentGenData:SetTaskStatus(taskName, newStatus)
     if (self.currentTask ~= "" and self.currentTask ~= taskName) and (self:GetTaskStatus(self.currentTask) ~= TaskState.completed) then
         log_util.PrintAndLogMessage("Cannot start a new task. Current task still in progress " .. self.currentTask)
@@ -265,8 +298,8 @@ end
 
 -- Extracts and converts MSVC response file format to clang-compatible format
 -- Converts MSVC compiler flags to clang flags and adds Unreal Engine specific includes
--- @param rsppath: Path to the MSVC response file
--- @return: Converted clang-compatible response file content
+---@param rsppath string Path to the MSVC response file
+---@return string|nil Converted clang-compatible response file content
 function ExtractRSP(rsppath)
     local extraFlags = "-std=c++20 -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -ferror-limit=0 -Wno-inconsistent-missing-override"
     local extraIncludes = {
@@ -328,8 +361,8 @@ end
 
 
 -- Checks if a window is a quickfix window
--- @param winid: Window ID to check
--- @return: true if window is quickfix, false otherwise
+---@param winid number Window ID to check
+---@return boolean true if window is quickfix, false otherwise
 local function IsQuickfixWin(winid)
     if not vim.api.nvim_win_is_valid(winid) then return false end
     local bufnr = vim.api.nvim_win_get_buf(winid)
@@ -339,7 +372,7 @@ local function IsQuickfixWin(winid)
 end
 
 -- Finds the quickfix window ID
--- @return: Window ID of quickfix window or nil if not found
+---@return number|nil Window ID of quickfix window or nil if not found
 local function GetQuickfixWinId()
     local quickfix_winid = nil
 
@@ -370,14 +403,14 @@ local function ScrollQF()
 end
 
 -- Appends an entry to the quickfix list and scrolls to show it
--- @param entry: Quickfix entry to add
+---@param entry table Quickfix entry to add
 local function AppendToQF(entry)
     vim.fn.setqflist({}, 'a', { items = { entry } })
     ScrollQF()
 end
 
 -- Safely deletes an autocmd by ID
--- @param AutocmdId: ID of the autocmd to delete
+---@param AutocmdId number ID of the autocmd to delete
 local function DeleteAutocmd(AutocmdId)
     local success, _ = pcall(function()
         vim.api.nvim_del_autocmd(AutocmdId)
@@ -391,6 +424,12 @@ function Stage_UbtGenCmd()
     coroutine.yield()
     Commands.BeginTask("gencmd")
     log_util.PrintAndLogMessage("callback called!")
+    
+    if not CurrentGenData.target then
+        log_util.PrintAndLogError("CurrentGenData.target is nil")
+        return
+    end
+    
     local outputJsonPath = CurrentGenData.config.EngineDir .. "/compile_commands.json"
 
     local rspdir = CurrentGenData.prjDir .. "/Intermediate/clangRsp/" .. 
@@ -458,7 +497,7 @@ function Stage_UbtGenCmd()
                 end
 
                 local rsppath = line:sub(j+1, endpos-1)
-                if rsppath and file_exists(rsppath) then
+                if rsppath and file_util.file_exists(rsppath) then
                     local newrsppath = rsppath .. ".clang.rsp"
 
                     -- rewrite rsp contents
@@ -543,7 +582,7 @@ function Stage_UbtGenCmd()
     local cmd = CurrentGenData.ubtPath .. " -project=" ..
         CurrentGenData.projectPath .. " " .. CurrentGenData.target.UbtExtraFlags .. " " ..
         CurrentGenData.prjName .. CurrentGenData.targetNameSuffix .. " " .. CurrentGenData.target.Configuration .. " " ..
-        CurrentGenData.target.PlatformName .. " -headers"
+        CurrentGenData.target.PlatformName .. " -headers" 
 
     vim.cmd("compiler msvc")
     vim.cmd("Dispatch " .. cmd)
@@ -580,7 +619,7 @@ end
 
 -- Callback function for dispatch commands
 -- Creates a new coroutine to handle the callback data
--- @param data: Data passed from the dispatch command
+---@param data string|nil Data passed from the dispatch command
 function DispatchUnrealnvimCb(data)
      log_util.log("DispatchUnrealnvimCb()")
      Commands.taskCoroutine = coroutine.create(FuncBind(DispatchCallbackCoroutine, data))
@@ -588,7 +627,7 @@ function DispatchUnrealnvimCb(data)
 
 -- Handles dispatch callbacks and routes to appropriate stage functions
 -- Manages task state transitions based on callback data
--- @param data: Callback data indicating which stage to execute
+---@param data string|nil Callback data indicating which stage to execute
 function DispatchCallbackCoroutine(data)
     coroutine.yield()
     if not data then
@@ -606,7 +645,7 @@ end
 
 -- Prompts user to select a build target from the configuration
 -- Displays available targets and waits for user input
--- @return: Selected target index as number
+---@return number|nil Selected target index as number
 function PromptBuildTargetIndex()
     print("target to build:")
     for i, x in ipairs(CurrentGenData.config.Targets) do
@@ -620,7 +659,7 @@ function PromptBuildTargetIndex()
 end
 
 -- Gets the current project name with .uproject extension
--- @return: Project name with .uproject extension or empty string if not found
+---@return string Project name with .uproject extension or empty string if not found
 function Commands.GetProjectName()
     local current_file_path = vim.api.nvim_buf_get_name(0)
     local prjDir, uprojectPath = file_util.find_file_with_extension(current_file_path, "uproject")
@@ -634,7 +673,7 @@ end
 
 -- Initializes the global generation data with project and engine information
 -- Sets up paths, prompts for target selection, and validates configuration
--- @return: true if initialization successful, false otherwise
+---@return boolean true if initialization successful, false otherwise
 function InitializeCurrentGenData()
     log_util.PrintAndLogMessage("initializing")
     local current_file_path = vim.api.nvim_buf_get_name(0)
@@ -646,8 +685,10 @@ function InitializeCurrentGenData()
     
     CurrentGenData.prjName = vim.fn.fnamemodify(CurrentGenData.uprojectPath, ":t:r")
 
-    CurrentGenData.config = Commands._EnsureConfigFile(CurrentGenData.prjDir,
+    ---@type UnrealConfig|nil
+    local config = Commands._EnsureConfigFile(CurrentGenData.prjDir,
         CurrentGenData.prjName)
+    CurrentGenData.config = config
 
     if not CurrentGenData.config then
         log_util.PrintAndLogMessage("no config file. aborting")
@@ -673,7 +714,7 @@ function InitializeCurrentGenData()
 end
 
 -- Schedules a task to be executed (sets status to scheduled)
--- @param taskName: Name of the task to schedule
+---@param taskName string Name of the task to schedule
 function Commands.ScheduleTask(taskName)
     log_util.PrintAndLogMessage("ScheduleTask: " .. taskName)
     CurrentGenData:SetTaskStatus(taskName, TaskState.scheduled)
@@ -685,14 +726,14 @@ function Commands.ClearTasks()
 end
 
 -- Begins execution of a task (sets status to inprogress)
--- @param taskName: Name of the task to begin
+---@param taskName string Name of the task to begin
 function Commands.BeginTask(taskName)
     log_util.PrintAndLogMessage("BeginTask: " .. taskName)
     CurrentGenData:SetTaskStatus(taskName, TaskState.inprogress)
 end
 
 -- Marks a task as completed and cleans up coroutine
--- @param taskName: Name of the task to complete
+---@param taskName string Name of the task to complete
 function Commands.EndTask(taskName)
     log_util.PrintAndLogMessage("EndTask: " .. taskName)
     CurrentGenData:SetTaskStatus(taskName, TaskState.completed)
@@ -730,7 +771,7 @@ end
 
 -- Main build command function
 -- Initializes project data and starts build process
--- @param opts: Build options (currently unused)
+---@param opts table|nil Build options (currently unused)
 function Commands.build(opts)
     CurrentGenData:ClearTasks()
     log_util.PrintAndLogMessage("Building uproject")
@@ -748,7 +789,7 @@ end
 
 -- Main run command function
 -- Determines whether to run editor or game executable and dispatches command
--- @param opts: Run options (currently unused)
+---@param opts table|nil Run options (currently unused)
 function Commands.run(opts)
     CurrentGenData:ClearTasks()
     log_util.PrintAndLogMessage("Running uproject")
@@ -811,7 +852,7 @@ end
 
 -- Main command generation function
 -- Sets up autocmd for callback and starts the generation coroutine
--- @param opts: Generation options including WithEngine flag
+---@param opts table|nil Generation options including WithEngine flag
 function Commands.generateCommands(opts)
     log_util.log(Commands.Inspect(opts))
 
@@ -862,7 +903,7 @@ local resetCount = 0
 
 -- Updates UI animations based on elapsed time
 -- Cycles through animation frames at specified intervals
--- @param delta: Elapsed time since last update
+---@param delta number Elapsed time since last update
 function Commands:uiUpdate(delta)
     local animFrameCount = 4
     local animFrameDuration = 200
@@ -922,7 +963,7 @@ end
 
 
 -- Sets the current animation from the spinners.json file
--- @param animationName: Name of the animation to load
+---@param animationName string Name of the animation to load
 function Commands:SetCurrentAnimation(animationName)
     local jsonPath = file_util.GetInstallDir() .. "lua/spinners.json"
     local file = io.open(jsonPath, "r")

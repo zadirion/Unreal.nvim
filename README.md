@@ -4,8 +4,9 @@ Unreal Engine support for Neovim
 
 **Requirements**
 
-- make sure you install  the clangd support component through Visual Studio Setup, and make sure the installed clang++.exe is in your system path env variable. Needs to be added manually to path, the installer does not do that
-- has been tested with Unreal Engine 5.1 and 5.2. Unsure what, if any other versions work
+- make sure you have Visual Studio 2022 installed, and install the clangd component using the VS Installer
+- download the latest version of llvm from https://github.com/llvm/llvm-project/releases/ and put it in `C:\Program Files\LLVM`. That's the only path where it detected
+- Unreal.nvim has been tested with Unreal Engine 5.1 and 5.2. Unsure what, if any other versions work
 - (optional) If you don't already have your own configuration, I recommend you use my neovim configuration specialized for development in Unreal Engine https://github.com/zadirion/UnrealHero.nvim
 
 **Installation**
@@ -15,7 +16,8 @@ Install with packer:
   use {'zadirion/Unreal.nvim',
     requires =
     {
-        {"tpope/vim-dispatch"}
+        {"tpope/vim-dispatch"},
+		    {"neovim/nvim-lspconfig"}
     }
   }
 ```

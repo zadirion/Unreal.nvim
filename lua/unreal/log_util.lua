@@ -12,8 +12,8 @@ local kLogLevel_VeryVerbose = 5
 local logFilePath = vim.fn.stdpath("data") .. '/unrealnvim.log'
 
 -- Logs a message with specified verbosity level if debugging is enabled
--- @param verbosity: The log level (1-5)
--- @param message: The message to log
+---@param verbosity number The log level (1-5)
+---@param message string The message to log
 local function logWithVerbosity(verbosity, message)
     if not vim.g.unrealnvim_debug then return end
     local cfgVerbosity = kLogLevel_Log
@@ -23,6 +23,9 @@ local function logWithVerbosity(verbosity, message)
     if verbosity > cfgVerbosity then return end
 
     local file = nil
+    -- Note: Commands.logFile is a global variable from commands.lua,
+    -- which might not be ideal for a standalone utility.
+    -- For now, it's kept for compatibility.
     if Commands and Commands.logFile then
         file = Commands.logFile
     else
@@ -36,7 +39,7 @@ local function logWithVerbosity(verbosity, message)
 end
 
 -- Logs a message at the default log level
--- @param message: The message to log
+---@param message string|nil The message to log
 local function log(message)
     if not message then
         logWithVerbosity(kLogLevel_Error, "message was nill")
@@ -47,14 +50,14 @@ local function log(message)
 end
 
 -- Logs an error message at error level
--- @param message: The error message to log
+---@param message string The error message to log
 local function logError(message)
     logWithVerbosity(kLogLevel_Error, message)
 end
 
 -- Prints and logs a message (combines print and log)
--- @param a: First part of the message
--- @param b: Second part of the message (optional)
+---@param a string|nil First part of the message
+---@param b string|nil Second part of the message (optional)
 local function PrintAndLogMessage(a,b)
     if a and b then
         log(tostring(a)..tostring(b))
@@ -64,8 +67,8 @@ local function PrintAndLogMessage(a,b)
 end
 
 -- Prints and logs an error message (combines print and log with error prefix)
--- @param a: First part of the error message
--- @param b: Second part of the error message (optional)
+---@param a string|nil First part of the error message
+---@param b string|nil Second part of the error message (optional)
 local function PrintAndLogError(a,b)
     if a and b then
         local msg = "Error: "..tostring(a)..tostring(b)
