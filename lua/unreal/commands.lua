@@ -20,6 +20,7 @@ end
 -- Import utility modules
 local file_util = require("unreal.file_util")
 local log_util = require("unreal.log_util")
+local msvc_env = require("unreal.msvc_env")
 
 -- Type definitions for better IDE support
 ---@class TargetConfig
@@ -336,12 +337,15 @@ function ExtractIncludePathsFromVCXProj(Configuration)
         for includePath in propertyGroupContent:gmatch('<IncludePath>([^<]+)</IncludePath>') do
             -- Split the include path by semicolon (MSVC format)
             for path in includePath:gmatch('[^;]+') do
-                path = path:gsub("\\", "/") -- Convert backslashes to forward slashes
-                
-                -- Check if path starts with engine directory and ends with "UHT"
-                if path:find("^" .. engineDir) and path:find("/UHT/?$") then
-                    table.insert(includePaths, path)
-                end
+                table.insert(includePaths, path)
+            end
+        end
+
+        for includePath in propertyGroupContent:gmatch('<ClCompile_AdditionalIncludeDirectories>([^<]+)</ClCompile_AdditionalIncludeDirectories>') do
+            -- Split the include path by semicolon (MSVC format)
+            for path in includePath:gmatch('[^;]+') do
+                local resolvedPath = file_util.resolve_relative(vcxprojPath, path)
+                table.insert(includePaths, resolvedPath)
             end
         end
     end
@@ -370,7 +374,12 @@ function ExtractRSP(rsppath)
         "Engine/Source/Runtime/TraceLog/Public",
         "Engine/Source/Runtime/AutoRTFM/Public",
         "Engine/Source/Runtime/Engine/Classes",
-        "Engine/Source/Runtime/Engine/Public"
+        "Engine/Source/Runtime/Engine/Public",
+        "Engine/Source/Runtime/Net/Core/Public",
+        "Engine/Source/Runtime/PhysicsCore/Public",
+        "Engine/Source/Runtime/InputCore/Classes",
+        "Engine/Source/Runtime/Experimental/Chaos/Public",
+        "Engine/Source/Runtime/Experimental/ChaosCore/Public",
     }
 
     rsppath = rsppath:gsub("\\\\","/")
@@ -382,8 +391,31 @@ function ExtractRSP(rsppath)
     end
 
     local lines = {}
+    local lineNb = 1;
+
+    -- add the msvc version to the rsp
+    local msvc_version = msvc_env.get_msvc_version()
+    log_util.PrintAndLogMessage("msvc_version: " .. msvc_version)
+    lines[lineNb] = "\n" .. "-fms-compatibility-version=" .. (msvc_version or "UNKNOWN")
+    lineNb = lineNb + 1
+
+    -- add --target=x86_64-pc-windows-msvc
+    local arch = CurrentGenData.target.PlatformName == "Win64" and "x86_64" or "i686"
+    lines[lineNb] = "\n" .. "--target=" .. arch .. "-pc-windows-msvc"
+    lineNb = lineNb + 1
+
+    -- determine if we're on x64 or x86 based on the platform name
+    local arch2 = CurrentGenData.target.PlatformName == "Win64" and "x64" or "x86"
+
+    -- get the isystem flags from the msvc environment
+    local ISystemFlags = msvc_env.clang_isystem_flags({arch = arch2})
+    log_util.PrintAndLogMessage("ISystemFlags: " .. #ISystemFlags)
+    for _, flag in ipairs(ISystemFlags) do
+        lines[lineNb] = "\n" .. flag
+        lineNb = lineNb + 1
+    end
+
     local isFirstLine = true
-    local lineNb = 0;
     for line in io.lines(rsppath) do
         local discardLine = true
 
@@ -406,6 +438,7 @@ function ExtractRSP(rsppath)
 
         isFirstLine = false
     end
+
 
     for _, incl in ipairs(extraIncludes) do
         lines[lineNb] ="\n" .. "-include \"" .. CurrentGenData.config.EngineDir .. "/" .. incl .. "\""
@@ -571,7 +604,7 @@ function Stage_UbtGenCmd()
                 AppendToQF(qflistentry)
             end
 
-            line = line:gsub(old_text, new_text)
+            --line = line:gsub(old_text, new_text)
 
             -- content = content .. "matched:\n"
             i,j = line:find("%@")

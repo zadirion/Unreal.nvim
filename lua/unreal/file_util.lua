@@ -156,6 +156,49 @@ local function SplitString(str)
     return lines
 end
 
+-- Resolves a relative path to an absolute path
+---@param base_file string|nil The base file to resolve the relative path from
+---@param relative_path string|nil The relative path to resolve
+---@return string|nil The resolved absolute path
+ local function resolve_relative(base_file, relative_path)
+  -- Normalize slashes for consistency
+  base_file = base_file:gsub("\\", "/")
+  relative_path = relative_path:gsub("\\", "/")
+
+  -- Get the directory of the base file
+  local base_dir = base_file:match("^(.*)/[^/]+$") or base_file
+
+  -- If the relative path is already absolute (Windows drive or UNC path), return as-is
+  if relative_path:match("^%a:[/]") or relative_path:match("^//") then
+    return relative_path
+  end
+
+  -- Combine and normalize
+  local combined = base_dir .. "/" .. relative_path
+
+  -- Normalize any "." or ".." segments
+  local parts, out = {}, {}
+  for part in combined:gmatch("[^/]+") do
+    if part == ".." then
+      if #out > 0 then table.remove(out) end
+    elseif part ~= "." and part ~= "" then
+      table.insert(out, part)
+    end
+  end
+
+  local abs = table.concat(out, "/")
+
+  -- Restore backslashes for Windows style
+  return abs:gsub("/", "\\")
+end
+
+-- Example usage:
+local base = [[C:\Users\Eddie\Projects\main.cpp]]
+local rel  = [[..\include\myheader.h]]
+print(resolve_relative(base, rel))
+-- Output: C:\Users\Eddie\include\myheader.h
+
+
 -- Module exports
 return {
     MakeUnixPath = MakeUnixPath,
@@ -166,5 +209,9 @@ return {
     check_extension_in_directory = check_extension_in_directory,
     find_file_with_extension = find_file_with_extension,
     GetInstallDir = GetInstallDir,
-    SplitString = SplitString
+    SplitString = SplitString,
+    get_include_paths = get_include_paths,
+    get_isystem_flags = get_isystem_flags,
+    resolve_relative = resolve_relative
+
 }
