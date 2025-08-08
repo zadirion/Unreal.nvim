@@ -127,19 +127,24 @@ function Commands:Inspect(objToInspect)
 
     if not self._inspect then
         local inspect_path = vim.fn.stdpath("data") .. "/site/pack/packer/start/inspect.lua/inspect.lua"
-        self._inspect = loadfile(inspect_path)(Commands._inspect)
-        if  self._inspect then
-            log_util.log("Inspect loaded.")
+
+        local inspect_func = loadfile(inspect_path)
+        if inspect_func then
+            self._inspect = inspect_func()
+            if self._inspect then
+                log_util.log("Inspect loaded.")
+            else
+                log_util.logError("Inspect failed to load from path" .. inspect_path)
+            end
         else
-            log_util.logError("Inspect failed to load from path" .. inspect_path)
-        end
-        if self._inspect.inspect then
-            log_util.log("inspect method exists")
-        else
-            log_util.logError("inspect method doesn't exist")
+            log_util.logError("Failed to load inspect.lua from path" .. inspect_path)
         end
     end
-    return self._inspect.inspect(objToInspect)
+    if self._inspect and self._inspect.inspect then
+        return self._inspect.inspect(objToInspect)
+    else
+        return tostring(objToInspect)
+    end
 end
 
 
@@ -301,10 +306,18 @@ end
 ---@param rsppath string Path to the MSVC response file
 ---@return string|nil Converted clang-compatible response file content
 function ExtractRSP(rsppath)
-    local extraFlags = "-std=c++20 -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -ferror-limit=0 -Wno-inconsistent-missing-override"
+    local extraFlags = "-std=c++20 -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -ferror-limit=0 -Wno-inconsistent-missing-override -Wno-invalid-constexpr"
     local extraIncludes = {
         "Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h",
         "Engine/Source/Runtime/Core/Public/Misc/EnumRange.h"
+    }
+    local extraIncludeDirs = {
+        "Engine/Source/Runtime/Core/Public",
+        "Engine/Source/Runtime/Core/Public",
+        "Engine/Source/Runtime/CoreUObject/Public",
+        "Engine/Source/Runtime/TraceLog/Public",
+        "Engine/Source/Runtime/AutoRTFM/Public",
+        "Engine/Source/Runtime/Engine/Classes"
     }
 
     rsppath = rsppath:gsub("\\\\","/")
@@ -345,6 +358,12 @@ function ExtractRSP(rsppath)
         lines[lineNb] ="\n" .. "-include \"" .. CurrentGenData.config.EngineDir .. "/" .. incl .. "\""
         lineNb = lineNb + 1
     end
+    
+    for _, dir in ipairs(extraIncludeDirs) do
+        lines[lineNb] ="\n" .. "-I \"" .. CurrentGenData.config.EngineDir .. "/" .. dir .. "\""
+        lineNb = lineNb + 1
+    end
+    
     lines[lineNb] =  "\n" .. extraFlags
     lineNb = lineNb + 1
     --table.insert(lines, "\n\"" .. currentFilename .. "\"")
@@ -578,6 +597,8 @@ function Stage_UbtGenCmd()
         pattern = "*",
         callback = FuncBind(DispatchUnrealnvimCb, "headers")
     })
+
+
 
     local cmd = CurrentGenData.ubtPath .. " -project=" ..
         CurrentGenData.projectPath .. " " .. CurrentGenData.target.UbtExtraFlags .. " " ..
