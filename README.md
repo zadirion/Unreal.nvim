@@ -47,7 +47,7 @@ require('lspconfig').clangd.setup{
 Either source your init.lua or restart neovim, after which open a cpp file in your project and type :LspInfo and confirm you have an active client. And the command path points indeed to the clangd.exe inside program files' LLVM
 
 
-**Initiall commands**
+**Initial commands**
 
 After installing with packer, open one of your Unreal project's source files, and run `UnrealGenWithEngine`. This will go through all the engine source files and will generate a compatible clang compile-command for each, so that the lsp can properly parse them.
 It will take a long time to go through all of them, but you only need to run this command once, for your engine.
@@ -70,6 +70,9 @@ From here onwards, you can use `:UnrealGen` to generate the compile commands for
 `:UnrealGen` will always ask you which target to generate compile_commands.json for. Just input the number corresponding to the desired configuration, and it will generate the json right next to the uproject
 
 This should cause your LSP to start recognizing the Unreal types, including the ones from .generated.h files.
+
+**Bonus**
+The plugin includes a sample `sample_nvim_init.lua` that contains a sample one file configuration for nvim. It's been tested and known to work with `Unreal.nvim`. Just drop it in `%localappdata%/nvim` and rename it to init.lua. Take a look inside to familiarize yourself with the key bindings. Don't forget to `PackerSync` to pull all the plugins.
 
 **Commands**
 - `:UnrealGenWithEngine` generates the compile_commands.json and the compiler rsp files for the engine source code, so your LSP can properly parse the source code

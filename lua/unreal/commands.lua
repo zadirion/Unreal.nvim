@@ -367,7 +367,7 @@ function ExtractRSP(rsppath)
         "Engine/Source/Runtime/Core/Public/Misc/EnumRange.h"
     }
 
-
+    -- it's possible we don't need these anymore, as they're extracted from the vcxproj file
     local extraIncludeDirs = {
         "Engine/Source/Runtime/Core/Public",
         "Engine/Source/Runtime/CoreUObject/Public",
