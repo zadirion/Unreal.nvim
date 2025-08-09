@@ -4,16 +4,9 @@
 vim.opt.swapfile = false
 vim.opt.numberwidth = 5
 vim.opt.signcolumn = "yes"
+-- vim.opt.paste = true
 
 
--- debuging
-vim.g.unrealnvim_debug = true
-vim.lsp.set_log_level('debug')
-
-
--- =============================
--- Packer Bootstrap
--- =============================
 local ensure_packer = function()
   local fn = vim.fn
   local install_path = fn.stdpath('data') .. '/site/pack/packer/start/packer.nvim'
@@ -61,7 +54,6 @@ require('packer').startup(function(use)
   -- avante.nvim (cursor integration)
 
   -- Required plugins
-  use 'nvim-lua/plenary.nvim'
   use 'MunifTanjim/nui.nvim'
   use 'MeanderingProgrammer/render-markdown.nvim'
 
@@ -71,7 +63,6 @@ require('packer').startup(function(use)
   use 'hrsh7th/cmp-buffer'     -- buffer words
   use 'hrsh7th/cmp-path'       -- filesystem paths
 
-  use 'nvim-tree/nvim-web-devicons' -- or use 'echasnovski/mini.icons'
   use 'HakonHarnes/img-clip.nvim'
   use 'zbirenbaum/copilot.lua'
   use 'stevearc/dressing.nvim' -- for enhanced input UI
@@ -91,6 +82,11 @@ require('packer').startup(function(use)
   -- Snippet engine & its cmp source
   use 'L3MON4D3/LuaSnip'
   use 'saadparwaiz1/cmp_luasnip'
+
+  -- debugger
+  use 'mfussenegger/nvim-dap'
+  use {'rcarriga/nvim-dap-ui', requires = {"mfussenegger/nvim-dap", "nvim-neotest/nvim-nio"}}
+
 
   -- Automatically set up configuration after cloning packer
   if packer_bootstrap then
@@ -175,6 +171,7 @@ vim.keymap.set('n', '<leader>ff', builtin.find_files, { desc = 'Telescope find f
 vim.keymap.set('n', '<leader>fg', builtin.live_grep, { desc = 'Telescope live grep' })
 vim.keymap.set('n', '<leader>fb', builtin.buffers, { desc = 'Telescope buffers' })
 vim.keymap.set('n', '<leader>fh', builtin.help_tags, { desc = 'Telescope help tags' })
+
 
 -- Visual selections
 map('v', '<leader>rss', ':sort i<CR>')
@@ -306,7 +303,136 @@ cmp.setup({
   },
 })
 
+cmp.setup.filetype('TelescopePrompt', {enabled=false})
 
+-- telescope 
+local telescope = require('telescope')
+telescope.setup({})
+
+-- debugger setup
+local dap = require('dap')
+
+dap.adapters.codelldb = {
+	type = 'server',
+	port = '${port}',
+	executable = {
+		command = [[C:/Users/Eddie/.vscode/extensions/vadimcn.vscode-lldb-1.9.2/adapter/codelldb.exe]],
+		args = { '--port', '${port}' },
+	},
+}
+
+dap.configurations.cpp = {
+	{
+		name = 'Launch (CodeLLDB)',
+		type = 'codelldb',
+		request = 'launch',
+		program = function()
+			return "E:/UnrealProj_5.6/MyProject/Binaries/Win64/MyProject-Win64-DebugGame.exe"
+		end,
+		cwd = 'E:/UnrealProj_5.6/MyProject/Binaries/Win64/',
+		stopOnEntry = false,
+		evaluateForHovers = false,
+		showDisassembly = "never",
+		env = { _NT_SYMBOL_PATH = "" },  -- disable network symbol server
+		initCommands = {
+			"settings set target.process.stop-on-sharedlibrary-events false",
+		},
+	},
+}
+
+-- implement jumping to breakpoint when it's hit
+dap.listeners.after.event_stopped["jump_to_breakpoint"] = function(session, body)
+  local function jump_to_top_frame(thread_id)
+    session:request('stackTrace', { threadId = thread_id, startFrame = 0, levels = 1 }, function(err, resp)
+      if err or not resp or not resp.stackFrames or not resp.stackFrames[1] then return end
+      local f = resp.stackFrames[1]
+      if not f then return end
+
+      -- If we have a real file path, open it and jump
+      if f.source and f.source.path then
+        vim.schedule(function()
+          vim.cmd('edit ' .. f.source.path)
+          vim.api.nvim_win_set_cursor(0, { f.line, 0 })
+        end)
+        return
+      end
+
+      -- If it's an in-memory/sourceReference, fetch the source content
+      if f.source and f.source.sourceReference then
+        session:request('source', { sourceReference = f.source.sourceReference }, function(e2, src)
+          if e2 or not src or not src.content then return end
+          vim.schedule(function()
+            local buf = vim.api.nvim_create_buf(true, false)
+            vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(src.content, '\n', { plain = true }))
+            vim.api.nvim_set_current_buf(buf)
+            vim.api.nvim_win_set_cursor(0, { f.line, 0 })
+          end)
+        end)
+      end
+    end)
+  end
+
+  if body and body.threadId then
+    jump_to_top_frame(body.threadId)
+  else
+    -- Some adapters omit threadId in 'stopped' – ask for threads, pick one
+    session:request('threads', {}, function(err, resp)
+      if err or not resp or not resp.threads or not resp.threads[1] then return end
+      jump_to_top_frame(resp.threads[1].id)
+    end)
+  end
+end
+
+-- Breakpoint sign: red circle
+vim.fn.sign_define('DapBreakpoint', {
+  text = '🔴',
+  texthl = '',
+  linehl = '',
+  numhl = '',
+})
+
+-- Conditional breakpoint sign
+vim.fn.sign_define('DapBreakpointCondition', {
+  text = '🟠',
+  texthl = '',
+  linehl = '',
+  numhl = '',
+})
+
+-- Log point sign
+vim.fn.sign_define('DapLogPoint', {
+  text = '💬',
+  texthl = '',
+  linehl = '',
+  numhl = '',
+})
+
+vim.api.nvim_set_hl(0, 'DapStoppedLine', { link = 'Visual'})
+vim.fn.sign_define('DapStopped', {
+	text = '→',
+	texthl = 'DiagnosticWarn',
+	linehl = 'DapStoppedLine',
+	numhl = '',
+})
+
+-- dap optimizations, otherwise it's super slow 
+-- turn these back on on a per-need basis
+-- dap.set_exception_breakpoints({})
+
+local dapui = require('dapui')
+
+dapui.setup()
+
+-- Visual Studio style keymaps
+vim.keymap.set('n', '<F5>', function() dap.continue() end, { desc = 'DAP Continue/Start' })
+vim.keymap.set('n', '<F10>', function() dap.step_over() end, { desc = 'DAP Step Over' })
+vim.keymap.set('n', '<F11>', function() dap.step_into() end, { desc = 'DAP Step Into' })
+vim.keymap.set('n', '<S-F11>', function() dap.step_out() end, { desc = 'DAP Step Out' })
+vim.keymap.set('n', '<F9>', function() dap.toggle_breakpoint() end, { desc = 'DAP Toggle Breakpoint' })
+
+-- Add watch (DAP UI)
+vim.keymap.set('n', '<leader>dw', function() dapui.elements.watches.add() end, { desc = 'DAP Add Watch' })
+vim.keymap.set('n', '<leader>do', function() dapui.open() end, { desc = 'DAP open UI' })
+vim.keymap.set('n', '<leader>dc', function() dapui.close() end, { desc = 'DAP close UI' })
 
 -- === End of file ===
-
